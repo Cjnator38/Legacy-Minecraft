@@ -17,11 +17,12 @@ import net.minecraft.client.input.MouseButtonInfo;
 import net.minecraft.network.chat.Component;
 import net.minecraft.util.Mth;
 import net.minecraft.sounds.SoundEvents;
-import net.minecraft.world.inventory.ClickType;
+import net.minecraft.world.inventory.ContainerInput;
 import net.minecraft.world.inventory.Slot;
 import org.lwjgl.glfw.GLFW;
 import wily.factoryapi.FactoryEvent;
 import wily.factoryapi.base.Stocker;
+import wily.factoryapi.base.client.UIAccessor;
 import wily.factoryapi.util.ListMap;
 import wily.legacy.Legacy4J;
 import wily.legacy.Legacy4JClient;
@@ -58,6 +59,7 @@ public class ControllerManager {
     protected Minecraft minecraft;
     protected boolean isControllerTheLastInput = false;
     private KeyMapping[] orderedKeyMappings;
+    private KeyMapping controllerDebugOverlayKey;
 
     public static Controller.Handler getHandler() {
         return LegacyOptions.selectedControllerHandler.get();
@@ -261,12 +263,13 @@ public class ControllerManager {
                         minecraft.screen.mouseDragged(getMouseEvent(0), 0, 0);
 
                     if (state.is(ControllerBinding.UP_BUTTON) && state.justPressed && minecraft.screen instanceof LegacyMenuAccess<?> a && a.isMouseDragging()) {
-                        minecraft.gameMode.handleInventoryMouseClick(a.getMenu().containerId, a.getHoveredSlot().index, 0, ClickType.QUICK_MOVE, minecraft.player);
+                        minecraft.gameMode.handleContainerInput(a.getMenu().containerId, a.getHoveredSlot().index, 0, ContainerInput.QUICK_MOVE, minecraft.player);
                         minecraft.screen.mouseDragged(getMouseEvent(0), 0, 0);
                         LegacySoundUtil.playSimpleUISound(SoundEvents.UI_BUTTON_CLICK.value(), 1.0f);
                     }
                     int mouseClick = Controller.Event.of(minecraft.screen).getBindingMouseClick(state);
-                    if (mouseClick != -1 && (!state.is(ControllerBinding.LEFT_TRIGGER) || (minecraft.screen instanceof LegacyMenuAccess<?> a && a.isOutsideClick(mouseClick)))) {
+                    if (mouseClick != -1 &&
+                            (!state.is(ControllerBinding.LEFT_TRIGGER) || (minecraft.screen instanceof LegacyMenuAccess<?> a && a.isOutsideClick(mouseClick)))) {
                         isControllerSimulatingInput = true;
                         if (state.pressed && state.onceClick(true))
                             ((MouseHandlerAccessor) minecraft.mouseHandler).pressMouse(minecraft.getWindow().handle(), new MouseButtonInfo(mouseClick, 0), 1);
@@ -314,6 +317,7 @@ public class ControllerManager {
                 if (state.is(ControllerBinding.START) && state.pressed) {
                     keyMapping.setDown(false);
                 } else {
+                    if (handleDebugKeyMapping(keyMapping, state)) continue;
                     if (state.canClick()) keyMapping.clickCount++;
                     if (state.pressed && state.canDownKeyMapping(keyMapping)) keyMapping.setDown(true);
                     else if (state.canReleaseKeyMapping(keyMapping)) keyMapping.setDown(false);
@@ -328,11 +332,53 @@ public class ControllerManager {
 
         ControllerBinding<?> binding = LegacyKeyMapping.of(minecraft.options.keyScreenshot).getBinding();
         if (binding != null && binding.state().justPressed) {
-            Screenshot.grab(this.minecraft.gameDirectory, this.minecraft.getMainRenderTarget(), component -> this.minecraft.execute(() -> this.minecraft.gui.getChat().addMessage(component)));
+            Screenshot.grab(this.minecraft.gameDirectory, this.minecraft.getMainRenderTarget(), component -> this.minecraft.execute(() -> this.minecraft.gui.getChat().addClientSystemMessage(component)));
         }
 
         if (minecraft.screen != null) Controller.Event.of(minecraft.screen).controllerTick(controller);
         if (LegacyTipManager.getActualTip() != null) LegacyTipManager.getActualTip().controllerTick(controller);
+    }
+
+    private boolean handleDebugKeyMapping(KeyMapping keyMapping, BindingState state) {
+        if (!isDebugKeyMapping(keyMapping)) return false;
+        if (keyMapping == minecraft.options.keyDebugOverlay) {
+            if (state.justPressed && !state.isBlocked()) {
+                minecraft.debugEntries.toggleDebugOverlay();
+                controllerDebugOverlayKey = null;
+                state.block();
+            }
+            return true;
+        }
+        if (keyMapping == minecraft.options.keyDebugCrash) return true;
+        if (state.justPressed && !state.isBlocked()) {
+            boolean wasOverlayVisible = minecraft.debugEntries.isOverlayVisible();
+            boolean shouldCloseOverlay = wasOverlayVisible && keyMapping == controllerDebugOverlayKey;
+            KeyEvent event = createKeyEvent(keyMapping);
+            if (((KeyboardHandlerAccessor) minecraft.keyboardHandler).invokeHandleDebugKeys(event)) {
+                state.block();
+                if (shouldCloseOverlay) {
+                    minecraft.debugEntries.setOverlayVisible(false);
+                    controllerDebugOverlayKey = null;
+                } else if (!wasOverlayVisible && minecraft.debugEntries.isOverlayVisible()) {
+                    controllerDebugOverlayKey = keyMapping;
+                }
+            }
+        }
+        return true;
+    }
+
+    private boolean isDebugKeyMapping(KeyMapping keyMapping) {
+        if (keyMapping == minecraft.options.keyDebugOverlay) return true;
+        for (KeyMapping debugKey : minecraft.options.debugKeys)
+            if (keyMapping == debugKey) return true;
+        return false;
+    }
+
+    private KeyEvent createKeyEvent(KeyMapping keyMapping) {
+        InputConstants.Key key = LegacyKeyMapping.of(keyMapping).getKey();
+        if (key.getType() == InputConstants.Type.SCANCODE)
+            return new KeyEvent(InputConstants.UNKNOWN.getValue(), key.getValue(), 0);
+        return new KeyEvent(key.getValue(), 0, 0);
     }
 
     public boolean isHoveringWidget() {
@@ -465,7 +511,7 @@ public class ControllerManager {
             case ALWAYS -> enableCursor();
             case NEVER -> {
                 tryDisableCursor();
-                if (minecraft.screen != null) minecraft.screen.repositionElements();
+                if (minecraft.screen != null) UIAccessor.of(minecraft.screen).reloadUI();
             }
         }
     }

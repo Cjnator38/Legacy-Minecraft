@@ -1,21 +1,31 @@
 package wily.legacy.client.screen;
 
-import net.minecraft.client.gui.GuiGraphics;
+import net.minecraft.util.Util;
+import net.minecraft.client.Minecraft;
+import net.minecraft.client.gui.GuiGraphicsExtractor;
+import net.minecraft.client.gui.components.MultiLineLabel;
 import net.minecraft.client.gui.screens.Screen;
-import net.minecraft.resources.ResourceLocation;
+import net.minecraft.network.chat.Component;
+import net.minecraft.resources.Identifier;
+import wily.factoryapi.base.Bearer;
 import wily.factoryapi.base.client.FactoryGuiGraphics;
 import wily.factoryapi.base.client.SimpleLayoutRenderable;
 import wily.factoryapi.base.client.UIAccessor;
 import wily.legacy.util.LegacySprites;
+import wily.legacy.util.client.LegacyFontUtil;
 import wily.legacy.util.client.LegacyRenderUtil;
 
+import java.util.function.BiFunction;
 import java.util.function.Consumer;
 import java.util.function.Function;
 import java.util.function.Supplier;
 
 public class Panel extends SimpleLayoutRenderable {
+    // For tooltip boxes
+    public static final BiFunction<Component, Integer, MultiLineLabel> labelsCache = Util.memoize((c, i) -> MultiLineLabel.create(Minecraft.getInstance().font, c, i));
+    public static final BiFunction<Component, Integer, MultiLineLabel> sdLabelsCache = Util.memoize((c, i) -> MultiLineLabel.create(Minecraft.getInstance().font, c.copy().withStyle(c.getStyle().withFont(LegacyFontUtil.MOJANGLES_11_FONT)), i));
     protected final UIAccessor accessor;
-    public ResourceLocation panelSprite = LegacySprites.SMALL_PANEL;
+    public Identifier panelSprite = LegacySprites.SMALL_PANEL;
     public String name;
 
     public Panel(Screen screen) {
@@ -73,21 +83,25 @@ public class Panel extends SimpleLayoutRenderable {
         return Panel.createPanel(screen, p -> p.centeredLeftPos(screen) + xOffset.get(), p -> p.centeredTopPos(screen) + yOffset.get(), imageWidth, imageHeight);
     }
 
-    public static Panel centered(Screen screen, ResourceLocation panelSprite, int imageWidth, int imageHeight, int xOffset, int yOffset) {
+    public static Panel centered(Screen screen, Identifier panelSprite, int imageWidth, int imageHeight, int xOffset, int yOffset) {
         return Panel.createPanel(screen, p -> p.appearance(panelSprite, imageWidth, imageHeight), p -> p.pos(p.centeredLeftPos(screen) + xOffset, p.centeredTopPos(screen) + yOffset));
     }
 
-    public static Panel centered(Screen screen, ResourceLocation panelSprite, int imageWidth, int imageHeight) {
+    public static Panel centered(Screen screen, Identifier panelSprite, int imageWidth, int imageHeight) {
         return Panel.createPanel(screen, p -> p.appearance(panelSprite, imageWidth, imageHeight), p -> p.pos(p.centeredLeftPos(screen), p.centeredTopPos(screen)));
     }
 
     public static Panel tooltipBoxOf(Panel panel, int boxWidth) {
+        return tooltipBoxOf(panel, () -> boxWidth);
+    }
+
+    public static Panel tooltipBoxOf(Panel panel, Supplier<Integer> boxWidth) {
         Panel p = new Panel(panel.accessor) {
             @Override
             public void init(String name) {
                 super.init(name);
-                panel.x -= (boxWidth - 2) / 2;
-                appearance(LegacySprites.POINTER_PANEL, boxWidth, panel.height - 10);
+                panel.x -= (boxWidth.get() - 2) / 2;
+                appearance(LegacySprites.POINTER_PANEL, boxWidth.get(), panel.height - 10);
                 pos(panel.x + panel.width - 2, panel.y + 5);
             }
 
@@ -97,12 +111,16 @@ public class Panel extends SimpleLayoutRenderable {
             }
 
             @Override
-            public void render(GuiGraphics guiGraphics, int i, int j, float f) {
-                LegacyRenderUtil.renderPointerPanel(guiGraphics, getX(), getY(), getWidth(), getHeight());
+            public void extractRenderState(GuiGraphicsExtractor GuiGraphicsExtractor, int i, int j, float f) {
+                LegacyRenderUtil.renderPointerPanel(GuiGraphicsExtractor, getX(), getY(), getWidth(), getHeight());
             }
         };
         p.init();
         return p;
+    }
+
+    public void renderTooltipBox(Panel panel) {
+
     }
 
     public int centeredLeftPos(Screen screen) {
@@ -117,13 +135,15 @@ public class Panel extends SimpleLayoutRenderable {
         appearance(LegacySprites.SMALL_PANEL, width, height);
     }
 
-    public void appearance(ResourceLocation sprite, int width, int height) {
-        panelSprite = accessor.getElementValue(name + ".sprite", sprite, ResourceLocation.class);
+    public void appearance(Identifier sprite, int width, int height) {
+        panelSprite = accessor.getElementValue(name + ".sprite", sprite, Identifier.class);
         size(accessor.putStaticElement(name + ".width", accessor.getInteger(name + ".width", width)), accessor.putStaticElement(name + ".height", accessor.getInteger(name + ".height", height)));
     }
 
     public void pos(int x, int y) {
-        setPosition(accessor.putStaticElement(name + ".x", accessor.getInteger(name + ".x", x)), accessor.putStaticElement(name + ".y", accessor.getInteger(name + ".y", y)));
+        setX(x);
+        setY(y);
+        setPosition(accessor.putIntegerBearer(name + ".x", Bearer.of(this::getX, this::setX)), accessor.putIntegerBearer(name + ".y", Bearer.of(this::getY, this::setY)));
     }
 
     public void centered(Screen screen) {
@@ -138,8 +158,8 @@ public class Panel extends SimpleLayoutRenderable {
         init("panel");
     }
 
-    public void render(GuiGraphics guiGraphics, int i, int j, float f) {
-        FactoryGuiGraphics.of(guiGraphics).blitSprite(panelSprite, x, y, width, height);
+    public void extractRenderState(GuiGraphicsExtractor GuiGraphicsExtractor, int i, int j, float f) {
+        FactoryGuiGraphics.of(GuiGraphicsExtractor).blitSprite(panelSprite, x, y, width, height);
     }
 
     //TODO: Replace this with some kind of builder

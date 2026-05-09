@@ -1,18 +1,14 @@
 package wily.legacy;
 
-import net.minecraft.core.Holder;
 import net.minecraft.core.cauldron.CauldronInteraction;
-import net.minecraft.network.chat.Component;
-import net.minecraft.resources.ResourceLocation;
+import net.minecraft.core.cauldron.CauldronInteractions;
+import net.minecraft.resources.Identifier;
 import net.minecraft.server.MinecraftServer;
 import net.minecraft.server.level.ServerPlayer;
 import net.minecraft.server.players.PlayerList;
-import net.minecraft.tags.ItemTags;
 import net.minecraft.world.entity.*;
-import net.minecraft.world.item.alchemy.Potion;
 import net.minecraft.world.item.crafting.RecipeType;
 import net.minecraft.core.component.DataComponents;
-import net.minecraft.world.item.alchemy.PotionContents;
 import wily.factoryapi.base.network.CommonRecipeManager;
 import net.minecraft.world.item.*;
 import net.minecraft.world.phys.Vec3;
@@ -29,7 +25,10 @@ import wily.legacy.config.LegacyCommonOptions;
 import wily.legacy.config.LegacyMixinToggles;
 import wily.legacy.config.LegacyWorldOptions;
 import wily.legacy.init.*;
+import wily.legacy.mobcaps.LegacyMobCaps;
 import wily.legacy.network.*;
+import wily.legacy.skins.SkinsBootstrap;
+import wily.legacy.skins.skin.SkinSync;
 import wily.legacy.entity.LegacyPlayerInfo;
 import wily.legacy.util.ArmorStandPose;
 
@@ -56,7 +55,7 @@ import java.util.zip.ZipEntry;
 import java.util.zip.ZipInputStream;
 
 //? if forge || neoforge
-/*@Mod(Legacy4J.MOD_ID)*/
+//@Mod(Legacy4J.MOD_ID)
 public class Legacy4J {
 
     public static final String MOD_ID = "legacy";
@@ -107,7 +106,7 @@ public class Legacy4J {
         FactoryConfig.registerCommonStorage(createModLocation("common"), LegacyCommonOptions.COMMON_STORAGE);
         FactoryConfig.registerCommonStorage(createModLocation("mixin_common"), MIXIN_CONFIGS_STORAGE);
         LegacyRegistries.register();
-        LegacyGameRules.init();
+        LegacyGameRules.register();
         FactoryEvent.registerPayload(r -> {
             r.register(false, ClientAdvancementsPayload.ID);
             r.register(false, ClientAnimalInLoveSyncPayload.ID);
@@ -119,12 +118,22 @@ public class Legacy4J {
             r.register(false, PlayerInfoSync.All.ID_S2C);
             r.register(true, ServerMenuCraftPayload.ID);
             r.register(true, ServerOpenClientMenuPayload.ID);
+            r.register(true, ServerHostOptionsPayload.ID);
             r.register(true, ServerPlayerMissHitPayload.ID);
+            r.register(true, ServerPlayerShieldPausePayload.ID);
             r.register(false, TipCommand.Payload.ID);
             r.register(false, TipCommand.EntityPayload.ID);
             r.register(false, TopMessage.Payload.ID);
+            r.register(true, SkinSync.SetSkinC2S.ID);
+            r.register(false, SkinSync.SyncSkinS2C.ID);
+            r.register(false, SkinSync.RequestSkinS2C.ID);
+            r.register(true, SkinSync.RequestSnapshotC2S.ID);
+            r.register(true, SkinSync.UploadAssetChunkC2S.ID);
+            r.register(false, SkinSync.SyncAssetChunkS2C.ID);
         });
+        SkinsBootstrap.initCommon();
         ArmorStandPose.init();
+        LegacyMobCaps.init();
         FactoryEvent.setItemComponent(Items.CAKE, DataComponents.MAX_STACK_SIZE, 64);
         FactoryEvent.registerCommands(TipCommand::register);
         FactoryEvent.setup(Legacy4J::setup);
@@ -134,7 +143,7 @@ public class Legacy4J {
         FactoryEvent.PlayerEvent.RELOAD_RESOURCES_EVENT.register(Legacy4J::onResourcesReload);
     }
 
-    public static ResourceLocation createModLocation(String path) {
+    public static Identifier createModLocation(String path) {
         return FactoryAPI.createLocation(MOD_ID, path);
     }
 
@@ -155,7 +164,7 @@ public class Legacy4J {
     }
 
     public static void tagsLoaded() {
-        LegacyBlockBehaviors.registerDyedWaterCauldronInteraction(CauldronInteraction.WATER.map());
+        LegacyBlockBehaviors.registerDyedWaterCauldronInteraction(CauldronInteractions.WATER);
     }
 
     public static Vec3 getRelativeMovement(LivingEntity entity, float f, Vec3 vec3, int relRot) {

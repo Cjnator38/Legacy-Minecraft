@@ -11,7 +11,7 @@ import net.minecraft.network.protocol.Packet;
 import net.minecraft.network.protocol.game.ClientGamePacketListener;
 import net.minecraft.network.protocol.game.ClientboundBlockEntityDataPacket;
 import net.minecraft.resources.ResourceKey;
-import net.minecraft.resources.ResourceLocation;
+import net.minecraft.resources.Identifier;
 import net.minecraft.server.level.ServerLevel;
 import net.minecraft.util.ProblemReporter;
 import net.minecraft.world.item.Item;
@@ -46,10 +46,13 @@ public class WaterCauldronBlockEntity extends BlockEntity {
     @Override
     public void setChanged() {
         super.setChanged();
-        if (level.isClientSide()) {
+        if (level == null)
+            return;
+        if (!level.isClientSide()) {
             level.sendBlockUpdated(getBlockPos(), getBlockState(), getBlockState(), 2);
-        } else if (level instanceof ServerLevel l) {
-            l.getChunkSource().blockChanged(getBlockPos());
+            if (level instanceof ServerLevel l) {
+                l.getChunkSource().blockChanged(getBlockPos());
+            }
         }
     }
 
@@ -70,6 +73,7 @@ public class WaterCauldronBlockEntity extends BlockEntity {
             convertTo((LayeredCauldronBlock) Blocks.WATER_CAULDRON);
         } else convertToColored();
         this.waterColor = waterColor;
+        setChanged();
     }
 
     public Holder<Potion> getDefaultPotion() {
@@ -87,9 +91,10 @@ public class WaterCauldronBlockEntity extends BlockEntity {
     @Override
     public void loadAdditional(ValueInput input) {
         super.loadAdditional(input);
+        waterColor = null;
         input.getInt("dyeColor").ifPresent(i -> waterColor = i);
-        input.getString("potion").flatMap(id -> BuiltInRegistries.POTION.get(ResourceKey.create(Registries.POTION, ResourceLocation.tryParse(id)))).ifPresent(p -> potion = p);
-        input.getString("lastPotionItemUsed").flatMap(id -> BuiltInRegistries.ITEM.get(ResourceKey.create(Registries.ITEM, ResourceLocation.tryParse(id)))).ifPresent(p -> lastPotionItemUsed = p);
+        input.getString("potion").flatMap(id -> BuiltInRegistries.POTION.get(ResourceKey.create(Registries.POTION, Identifier.tryParse(id)))).ifPresent(p -> potion = p);
+        input.getString("lastPotionItemUsed").flatMap(id -> BuiltInRegistries.ITEM.get(ResourceKey.create(Registries.ITEM, Identifier.tryParse(id)))).ifPresent(p -> lastPotionItemUsed = p);
     }
 
     @Override
@@ -97,9 +102,8 @@ public class WaterCauldronBlockEntity extends BlockEntity {
         super.saveAdditional(output);
         if (waterColor != null) {
             output.putInt("dyeColor", waterColor);
-            convertToColored();
         }
-        potion.unwrapKey().ifPresent(r -> output.putString("potion", r.location().toString()));
-        lastPotionItemUsed.unwrapKey().ifPresent(r -> output.putString("lastPotionItemUsed", r.location().toString()));
+        potion.unwrapKey().ifPresent(r -> output.putString("potion", r.identifier().toString()));
+        lastPotionItemUsed.unwrapKey().ifPresent(r -> output.putString("lastPotionItemUsed", r.identifier().toString()));
     }
 }

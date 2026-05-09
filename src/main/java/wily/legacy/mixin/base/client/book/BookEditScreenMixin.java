@@ -2,6 +2,7 @@ package wily.legacy.mixin.base.client.book;
 
 import com.llamalad7.mixinextras.sugar.Local;
 import com.mojang.blaze3d.platform.InputConstants;
+import net.minecraft.client.gui.GuiGraphicsExtractor;
 import net.minecraft.client.gui.components.Button;
 import net.minecraft.client.gui.components.MultiLineEditBox;
 import net.minecraft.client.gui.screens.Screen;
@@ -135,8 +136,8 @@ public abstract class BookEditScreenMixin extends Screen implements Controller.E
         this.backButton = this.addRenderableWidget(panel.createLegacyPageButton(panel.x + 26, panel.y + panel.height - 34, false, (button) -> this.pageBack(), true));
     }
 
-    @Inject(method = "renderBackground", at = @At("HEAD"), cancellable = true)
-    public void renderBackground(CallbackInfo ci) {
+    @Inject(method = "extractBackground", at = @At("HEAD"), cancellable = true)
+    public void renderBackground(GuiGraphicsExtractor GuiGraphicsExtractor, int i, int j, float f, CallbackInfo ci) {
         ci.cancel();
     }
 
@@ -157,16 +158,15 @@ public abstract class BookEditScreenMixin extends Screen implements Controller.E
         cir.setReturnValue(super.keyPressed(keyEvent));
     }
 
-    @ModifyArg(method = "render", at = @At(value = "INVOKE", target = "Lnet/minecraft/client/gui/GuiGraphics;drawString(Lnet/minecraft/client/gui/Font;Lnet/minecraft/network/chat/Component;IIIZ)V"), index = 2)
-    public int pageX(int x, @Local(ordinal = 4) int pageWidth) {
-        return panel.x + panel.width - 24 - pageWidth;
+    @ModifyArg(method = "visitText(Lnet/minecraft/client/gui/ActiveTextCollector;)V", at = @At(value = "INVOKE", target = "Lnet/minecraft/client/gui/ActiveTextCollector;accept(Lnet/minecraft/client/gui/TextAlignment;IILnet/minecraft/network/chat/Component;)V"), index = 1)
+    public int pageX(int anchorX) {
+        return panel.x + panel.width - 24;
     }
 
-    @ModifyArg(method = "render", at = @At(value = "INVOKE", target = "Lnet/minecraft/client/gui/GuiGraphics;drawString(Lnet/minecraft/client/gui/Font;Lnet/minecraft/network/chat/Component;IIIZ)V"), index = 3)
-    public int pageY(int x) {
+    @ModifyArg(method = "visitText(Lnet/minecraft/client/gui/ActiveTextCollector;)V", at = @At(value = "INVOKE", target = "Lnet/minecraft/client/gui/ActiveTextCollector;accept(Lnet/minecraft/client/gui/TextAlignment;IILnet/minecraft/network/chat/Component;)V"), index = 2)
+    public int pageY(int y) {
         return panel.y + 22;
     }
-
 
     @Override
     public boolean isPauseScreen() {

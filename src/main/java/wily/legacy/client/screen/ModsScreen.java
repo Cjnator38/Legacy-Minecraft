@@ -5,10 +5,10 @@ import com.google.common.cache.CacheLoader;
 import com.google.common.cache.LoadingCache;
 import com.mojang.blaze3d.platform.InputConstants;
 import com.mojang.blaze3d.platform.NativeImage;
-import net.minecraft.Util;
+import net.minecraft.util.Util;
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.gui.Font;
-import net.minecraft.client.gui.GuiGraphics;
+import net.minecraft.client.gui.GuiGraphicsExtractor;
 import net.minecraft.client.gui.components.AbstractButton;
 import net.minecraft.client.gui.components.AbstractWidget;
 import net.minecraft.client.gui.components.Renderable;
@@ -22,7 +22,7 @@ import net.minecraft.network.chat.ClickEvent;
 import net.minecraft.network.chat.Component;
 import net.minecraft.network.chat.FontDescription;
 import net.minecraft.network.chat.Style;
-import net.minecraft.resources.ResourceLocation;
+import net.minecraft.resources.Identifier;
 import net.minecraft.util.Mth;
 import wily.factoryapi.FactoryAPI;
 import wily.factoryapi.FactoryAPIClient;
@@ -52,12 +52,12 @@ public class ModsScreen extends PanelVListScreen {
         if (opt.isPresent() && mod.containsResource(opt.get()))
             try {
                 NativeImage image = NativeImage.read(mod.openResource(opt.get()));
-                ResourceLocation location = FactoryAPI.createLocation(mod.getId(), opt.get().toLowerCase(Locale.ENGLISH));
+                Identifier location = FactoryAPI.createLocation(mod.getId(), opt.get().toLowerCase(Locale.ENGLISH));
                 Minecraft.getInstance().getTextureManager().register(location, new DynamicTexture(/*? if >=1.21.5 {*/location::toString, /*?}*/image));
                 if (location != null) return new SizedLocation(location, image.getWidth(), image.getHeight());
             } catch (IOException e) {
             }
-        ResourceLocation defaultLogo = PackAlbum.Selector.DEFAULT_ICON;
+        Identifier defaultLogo = PackAlbum.Selector.DEFAULT_ICON;
         if (mod.getId().equals("minecraft"))
             defaultLogo = PackAlbum.Selector.getPackIcon(Minecraft.getInstance().getResourcePackRepository().getPack("vanilla"));
         return new SizedLocation(defaultLogo, 1, 1);
@@ -100,10 +100,6 @@ public class ModsScreen extends PanelVListScreen {
     public static Style urlClickStyle(String url) {
         Style style = Style.EMPTY;
 
-        //For some reason, Screen::handleComponentClicked doesn't allow to handle click events when outside a world by default (Minecraft::player can't be null)
-        // So I'm going to use this workaround for now
-        if (Minecraft.getInstance().player == null) return style;
-
         try {
             style = style.withClickEvent(new ClickEvent.OpenUrl(URI.create(url)));
         } catch (Exception e) {
@@ -118,7 +114,7 @@ public class ModsScreen extends PanelVListScreen {
         if (sorting.get() != 0) mods = mods.stream().sorted(Comparator.comparing(ModInfo::getName)).toList();
         mods.forEach(mod -> {
             if (mod.isHidden()) return;
-            renderableVList.addRenderable(new AbstractButton(0, 0, 260, 30, Component.literal(mod.getName())) {
+            renderableVList.addRenderable(new ListButton(renderableVList, 0, 0, 260, 30, Component.literal(mod.getName())) {
                 @Override
                 public void onPress(InputWithModifiers input) {
                     if (isFocused()) {
@@ -128,53 +124,49 @@ public class ModsScreen extends PanelVListScreen {
                 }
 
                 @Override
-                protected void renderWidget(GuiGraphics guiGraphics, int i, int j, float f) {
-                    super.renderWidget(guiGraphics, i, j, f);
+                protected void extractContents(GuiGraphicsExtractor GuiGraphicsExtractor, int i, int j, float f) {
+                    super.extractContents(GuiGraphicsExtractor, i, j, f);
                     if (isFocused()) focusedMod = mod;
                     FactoryScreenUtil.enableBlend();
                     SizedLocation logo = modLogosCache.apply(mod);
                     if (logo != null) {
                         int iconHeight = accessor.getInteger(getRenderableVList().name + ".buttonIcon.size", 20);
                         int iconPos = (height - iconHeight) / 2;
-                        FactoryGuiGraphics.of(guiGraphics).blit(logo.location, getX() + iconPos, getY() + iconPos, 0, 0, logo.getScaledWidth(iconHeight), iconHeight, logo.getScaledWidth(iconHeight), iconHeight);
+                        FactoryGuiGraphics.of(GuiGraphicsExtractor).blit(logo.location, getX() + iconPos, getY() + iconPos, 0, 0, logo.getScaledWidth(iconHeight), iconHeight, logo.getScaledWidth(iconHeight), iconHeight);
                     }
 
                     FactoryScreenUtil.disableBlend();
                 }
 
                 @Override
-                protected void renderScrollingString(GuiGraphics guiGraphics, Font font, int i, int j) {
+                protected void renderScrollingString(GuiGraphicsExtractor GuiGraphicsExtractor, Font font, int i, int j) {
                     SizedLocation logo = modLogosCache.apply(mod);
                     int iconHeight = accessor.getInteger(getRenderableVList().name + ".buttonIcon.size", 20);
                     int iconPos = (height - iconHeight) / 2;
                     int x = this.getX() + iconPos + accessor.getInteger(getRenderableVList().name + ".buttonMessage.xOffset", 10) + (logo == null ? iconHeight : logo.getScaledWidth(iconHeight));
-                    LegacyRenderUtil.renderScrollingString(guiGraphics, font, this.getMessage(), x, this.getY(), x + this.getWidth(), this.getY() + this.getHeight(), j, true);
+                    LegacyRenderUtil.renderScrollingString(GuiGraphicsExtractor, font, this.getMessage(), x, this.getY(), getX() + this.getWidth() - i, this.getY() + this.getHeight(), j, true);
                 }
 
-                @Override
-                protected void updateWidgetNarration(NarrationElementOutput narrationElementOutput) {
-                    defaultButtonNarrationText(narrationElementOutput);
-                }
             });
         });
     }
 
     @Override
-    public void renderDefaultBackground(GuiGraphics guiGraphics, int i, int j, float f) {
-        LegacyRenderUtil.renderDefaultBackground(accessor, guiGraphics, false);
-        tooltipBox.render(guiGraphics, i, j, f);
+    public void renderDefaultBackground(GuiGraphicsExtractor GuiGraphicsExtractor, int i, int j, float f) {
+        LegacyRenderUtil.renderDefaultBackground(accessor, GuiGraphicsExtractor, false);
+        tooltipBox.extractRenderState(GuiGraphicsExtractor, i, j, f);
         if (focusedMod != null) {
             AdvancedTextWidget label = modLabelsCache.getUnchecked(focusedMod).withPos(panel.x + panel.width + 5, panel.y + 41);
             scrollableRenderer.scrolled.max = Math.max(0, Mth.ceil((label.getHeight() - (tooltipBox.getHeight() - 50)) / 12f));
             SizedLocation logo = modLogosCache.apply(focusedMod);
             int x = panel.x + panel.width + (logo == null ? 5 : logo.getScaledWidth(28) + 10);
             if (logo != null)
-                FactoryGuiGraphics.of(guiGraphics).blit(logo.location, panel.x + panel.width + 5, panel.y + 10, 0.0f, 0.0f, logo.getScaledWidth(28), 28, logo.getScaledWidth(28), 28);
+                FactoryGuiGraphics.of(GuiGraphicsExtractor).blit(logo.location, panel.x + panel.width + 5, panel.y + 10, 0.0f, 0.0f, logo.getScaledWidth(28), 28, logo.getScaledWidth(28), 28);
             if (logo == null || logo.getScaledWidth(28) < 120) {
-                LegacyRenderUtil.renderScrollingString(guiGraphics, font, Component.translatable("legacy.menu.mods.id", focusedMod.getId()), x, panel.y + 12, panel.x + panel.width + 185, panel.y + 24, 0xFFFFFFFF, true);
-                LegacyRenderUtil.renderScrollingString(guiGraphics, font, Component.translatable("legacy.menu.mods.version", focusedMod.getVersion()), x, panel.y + 24, panel.x + panel.width + 185, panel.y + 36, 0xFFFFFFFF, true);
+                LegacyRenderUtil.renderScrollingString(GuiGraphicsExtractor, font, Component.translatable("legacy.menu.mods.id", focusedMod.getId()), x, panel.y + 12, panel.x + panel.width + 185, panel.y + 24, 0xFFFFFFFF, true);
+                LegacyRenderUtil.renderScrollingString(GuiGraphicsExtractor, font, Component.translatable("legacy.menu.mods.version", focusedMod.getVersion()), x, panel.y + 24, panel.x + panel.width + 185, panel.y + 36, 0xFFFFFFFF, true);
             }
-            scrollableRenderer.render(guiGraphics, panel.x + panel.width + 5, panel.y + 38, tooltipBox.getWidth() - 16, tooltipBox.getHeight() - 50, () -> label.render(guiGraphics, i, j + Math.round(scrollableRenderer.getYOffset()), f));
+            scrollableRenderer.extractRenderState(GuiGraphicsExtractor, panel.x + panel.width + 5, panel.y + 38, tooltipBox.getWidth() - 16, tooltipBox.getHeight() - 50, () -> label.extractRenderState(GuiGraphicsExtractor, i, j + Math.round(scrollableRenderer.getYOffset()), f));
         }
     }
 
@@ -232,7 +224,7 @@ public class ModsScreen extends PanelVListScreen {
         renderer.add(() -> ControlType.getActiveType().isKbm() ? ControlTooltip.getKeyIcon(InputConstants.KEY_X) : ControllerBinding.LEFT_BUTTON.getIcon(), () -> Component.translatable("legacy.menu.sorting", this.sorting.get() == 0 ? LegacyComponents.NONE : LegacyComponents.ALPHABETICAL));
     }
 
-    public record SizedLocation(ResourceLocation location, int width, int height) {
+    public record SizedLocation(Identifier location, int width, int height) {
         public int getScaledWidth(int height) {
             return (int) (height * ((float) width() / height()));
         }

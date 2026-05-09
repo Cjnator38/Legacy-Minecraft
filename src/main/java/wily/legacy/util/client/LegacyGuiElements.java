@@ -1,6 +1,6 @@
 package wily.legacy.util.client;
 
-import net.minecraft.Util;
+import net.minecraft.util.Util;
 import net.minecraft.client.KeyMapping;
 import net.minecraft.client.Minecraft;
 import wily.factoryapi.FactoryAPIClient;
@@ -25,24 +25,24 @@ public class LegacyGuiElements {
         ArbitrarySupplier<Float> hudScale = LegacyRenderUtil::getHUDScale;
 
         UIAccessor accessor = FactoryScreenUtil.getGuiAccessor();
-        FactoryGuiElement.HOTBAR.pre().register(guiGraphics -> {
-            AnimatedCharacterRenderer.render(guiGraphics);
+        FactoryGuiElement.HOTBAR.pre().register(GuiGraphicsExtractor -> {
+            AnimatedCharacterRenderer.render(GuiGraphicsExtractor);
             int newSelection = minecraft.player != null ? minecraft.player.getInventory().getSelectedSlot() : -1;
             if (lastHotbarSelection >= 0 && lastHotbarSelection != newSelection)
                 lastHotbarSelectionChange = Util.getMillis();
             lastHotbarSelection = newSelection;
         });
-        FactoryGuiElement.HOTBAR.post().register(guiGraphics -> {
+        FactoryGuiElement.HOTBAR.post().register(GuiGraphicsExtractor -> {
             if (minecraft.player != null)
-                ControlTooltip.Renderer.of(minecraft.gui).render(guiGraphics, 0, 0, FactoryAPIClient.getPartialTick());
-            LegacyRenderUtil.renderTopText(guiGraphics, TopMessage.small, 21, 1.0f, TopMessage.smallTicks);
-            LegacyRenderUtil.renderTopText(guiGraphics, TopMessage.medium, 37, 1.5f, TopMessage.mediumTicks);
+                ControlTooltip.Renderer.of(minecraft.gui).extractRenderState(GuiGraphicsExtractor, 0, 0, FactoryAPIClient.getPartialTick());
+            LegacyRenderUtil.renderTopText(GuiGraphicsExtractor, TopMessage.small, 21, 1.0f, TopMessage.smallTicks);
+            LegacyRenderUtil.renderTopText(GuiGraphicsExtractor, TopMessage.medium, 37, 1.5f, TopMessage.mediumTicks);
         });
-        FactoryGuiElement.SPECTATOR_HOTBAR.pre().register(guiGraphics -> {
-            LegacyFontUtil.legacyFont = false;
-            AnimatedCharacterRenderer.render(guiGraphics);
+        FactoryGuiElement.SPECTATOR_HOTBAR.pre().register(GuiGraphicsExtractor -> {
+            LegacyFontUtil.disableLegacyFont();
+            AnimatedCharacterRenderer.render(GuiGraphicsExtractor);
         });
-        FactoryGuiElement.SPECTATOR_HOTBAR.post().register(guiGraphics -> LegacyFontUtil.legacyFont = true);
+        FactoryGuiElement.SPECTATOR_HOTBAR.post().register(GuiGraphicsExtractor -> LegacyFontUtil.enableLegacyFont());
         accessor.addStatic(UIDefinition.createBeforeInit(a -> {
             if (!LegacyMixinOptions.legacyGui.get()) return;
             a.getElements().put(FactoryGuiElement.VIGNETTE.name() + ".isVisible", () -> false);
@@ -93,7 +93,6 @@ public class LegacyGuiElements {
                 LegacyOptions.UIMode uiMode = LegacyOptions.UIMode.values()[i];
                 a.getElements().put("uiMode." + uiMode.getSerializedName(), () -> LegacyOptions.getUIMode() == uiMode);
             }
-
         }));
     }
 }

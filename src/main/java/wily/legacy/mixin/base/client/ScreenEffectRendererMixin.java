@@ -4,15 +4,17 @@ import com.llamalad7.mixinextras.sugar.Local;
 import com.mojang.blaze3d.systems.RenderSystem;
 import com.mojang.blaze3d.vertex.PoseStack;
 import net.minecraft.client.Minecraft;
-import net.minecraft.client.gui.GuiGraphics;
+import net.minecraft.client.player.LocalPlayer;
+import net.minecraft.client.gui.GuiGraphicsExtractor;
 import net.minecraft.client.renderer.MultiBufferSource;
 import net.minecraft.client.renderer.ScreenEffectRenderer;
 import net.minecraft.client.renderer.SubmitNodeCollector;
-import net.minecraft.client.renderer.block.model.BakedQuad;
-import net.minecraft.client.renderer.block.model.BlockModelPart;
+import net.minecraft.client.resources.model.geometry.BakedQuad;
+import net.minecraft.client.renderer.block.dispatch.BlockStateModelPart;
 import net.minecraft.client.renderer.texture.TextureAtlasSprite;
 import net.minecraft.core.BlockPos;
 import net.minecraft.core.Direction;
+import net.minecraft.world.effect.MobEffects;
 import net.minecraft.world.entity.player.Player;
 import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.level.block.state.BlockState;
@@ -59,15 +61,21 @@ public abstract class ScreenEffectRendererMixin {
         /*BlockState state = pair.getLeft();
          *///?}
         List<BakedQuad> quads = Collections.emptyList();
-        List<BlockModelPart> parts = minecraft.getBlockRenderer().getBlockModelShaper().getBlockModel(state).collectParts(minecraft.player.getRandom());
+        List<BlockStateModelPart> parts = new java.util.ArrayList<>();
+        minecraft.getModelManager().getBlockStateModelSet().get(state).collectParts(minecraft.player.getRandom(), parts);
         if (!parts.isEmpty()) quads = parts.get(0).getQuads(Direction.UP);
         if (!quads.isEmpty()) {
             BakedQuad quad = quads.get(0);
-            f = quad.sprite();
-            texRenderColor = ColorUtil.withAlpha(minecraft.getBlockColors().getColor(state, minecraft.level, minecraft.player.blockPosition(), quad.tintIndex()), 1.0f);
+            f = quad.materialInfo().sprite();
+            texRenderColor = quad.materialInfo().isTinted() ? ColorUtil.withAlpha(minecraft.getBlockColors().getTintSource(state, quad.materialInfo().tintIndex()).colorInWorld(state, minecraft.level, minecraft.player.blockPosition()), 1.0f) : 0xFFFFFFFF;
         } else texRenderColor = 0xFFFFFFFF;
 
         return f;
+    }
+
+    @Redirect(method = "renderScreenEffect", at = @At(value = "INVOKE", target = "Lnet/minecraft/client/player/LocalPlayer;isOnFire()Z"))
+    private boolean renderScreenEffect(LocalPlayer player) {
+        return player.isOnFire() && !player.hasEffect(MobEffects.FIRE_RESISTANCE);
     }
 
     @Inject(method = "tick", at = @At("RETURN"))

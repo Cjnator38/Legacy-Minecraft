@@ -4,7 +4,7 @@ import com.google.common.collect.ImmutableList;
 import com.mojang.blaze3d.platform.InputConstants;
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.gui.ComponentPath;
-import net.minecraft.client.gui.GuiGraphics;
+import net.minecraft.client.gui.GuiGraphicsExtractor;
 import net.minecraft.client.gui.components.AbstractWidget;
 import net.minecraft.client.gui.components.Renderable;
 import net.minecraft.client.gui.components.events.GuiEventListener;
@@ -19,6 +19,7 @@ import wily.factoryapi.base.client.UIAccessor;
 import wily.factoryapi.base.config.FactoryConfig;
 import wily.legacy.client.CommonColor;
 import wily.legacy.client.LegacyOptions;
+import wily.legacy.client.RenderableVListEntry;
 import wily.legacy.util.client.LegacyFontUtil;
 import wily.legacy.util.client.LegacyRenderUtil;
 
@@ -26,6 +27,7 @@ import java.util.*;
 import java.util.function.Function;
 import java.util.function.IntConsumer;
 import java.util.function.Predicate;
+import java.util.function.Supplier;
 import java.util.stream.Stream;
 
 public class RenderableVList {
@@ -42,6 +44,11 @@ public class RenderableVList {
     public int listHeight;
     protected int renderablesCount;
     protected LegacyScrollRenderer scrollRenderer = new LegacyScrollRenderer();
+    protected int scrollArrowYOffset = -8;
+    protected int verticalScrollArrowWidth = 13;
+    protected int verticalScrollArrowHeight = 7;
+    protected int verticalScrollArrowOffsetX = 0;
+    protected int verticalScrollArrowOffsetY = 0;
     protected Function<LayoutElement, Integer> layoutSeparation = w -> LegacyOptions.getUIMode().isSD() ? 2 : 3;
 
     public RenderableVList(UIAccessor accessor) {
@@ -130,11 +137,7 @@ public class RenderableVList {
     }
 
     public RenderableVList addCategory(Component title) {
-        addRenderable(new SimpleLayoutRenderable(listWidth, 13) {
-            public void render(GuiGraphics guiGraphics, int i, int j, float f) {
-                LegacyFontUtil.applySDFont(b -> guiGraphics.drawString(Minecraft.getInstance().font, title, this.getX() + 1, this.getY() + 4, CommonColor.INVENTORY_GRAY_TEXT.get(), false));
-            }
-        });
+        addRenderable(new LayoutText(title, CommonColor.GRAY_TEXT, () -> LegacyOptions.getUIMode().isSD() ? 9 : 13));
         return this;
     }
 
@@ -153,37 +156,46 @@ public class RenderableVList {
         return this;
     }
 
+    public RenderableVList scrollArrowYOffset(int scrollArrowYOffset) {
+        this.scrollArrowYOffset = scrollArrowYOffset;
+        return this;
+    }
+
+    public RenderableVList verticalScrollArrowSize(int width, int height) {
+        this.verticalScrollArrowWidth = Math.max(1, width);
+        this.verticalScrollArrowHeight = Math.max(1, height);
+        return this;
+    }
+
+    public RenderableVList verticalScrollArrowOffset(int xOffset, int yOffset) {
+        this.verticalScrollArrowOffsetX = xOffset;
+        this.verticalScrollArrowOffsetY = yOffset;
+        return this;
+    }
+
     public void focusRenderable(Renderable renderable) {
         if (renderables.isEmpty()) return;
-        if (renderable instanceof GuiEventListener l && getScreen().children().contains(l)) {
+        int index = renderables.indexOf(renderable);
+        if (index < 0) return;
+        revealRenderable(index);
+        Renderable target = index < renderables.size() ? renderables.get(index) : renderable;
+        if (target instanceof GuiEventListener l && getScreen().children().contains(l)) {
             getScreen().setFocused(l);
             return;
         }
-        if (scrolledList.get() > 0) {
-            scrolledList.set(0);
-            accessor.reloadUI();
-        }
-        if (renderables.get(0) instanceof GuiEventListener l && getScreen().getFocused() != l)
-            getScreen().setFocused(l);
-        while (getScreen().getFocused() != renderable) {
-            if (forceWidth) {
-                ComponentPath path = getDirectionalNextFocusPath(ScreenDirection.DOWN);
-                if (isInvalidFocus(path, true)) {
-                    if (canScrollDown)
-                        while (canScrollDown && isInvalidFocus(getDirectionalNextFocusPath(ScreenDirection.DOWN), true))
-                            mouseScrolled(true);
-                    else break;
-                } else getScreen().setFocused(path.component());
-            } else {
-                GuiEventListener listener = getNextHorizontalRenderable();
-                if (listener == null) {
-                    ComponentPath path = getDirectionalNextFocusPath(ScreenDirection.RIGHT);
-                    if (isInvalidFocus(path, true)) {
-                        break;
-                    } else getScreen().setFocused(path.component());
-                } else getScreen().setFocused(listener);
+    }
+
+    private boolean focusEdgeRenderable(boolean last) {
+        int start = last ? renderables.size() - 1 : 0;
+        int step = last ? -1 : 1;
+        for (int i = start; i >= 0 && i < renderables.size(); i += step) {
+            Renderable renderable = renderables.get(i);
+            if (renderable instanceof GuiEventListener) {
+                focusRenderable(renderable);
+                return true;
             }
         }
+        return false;
     }
 
 
@@ -198,11 +210,11 @@ public class RenderableVList {
         this.listWidth = accessor.getInteger(name + ".width", listWidth);
         this.listHeight = accessor.getInteger(name + ".height", listHeight);
         boolean allowScroll = this.listHeight > 0;
-        if (allowScroll) accessor.getChildrenRenderables().add(((guiGraphics, i, j, f) -> {
+        if (allowScroll) accessor.getChildrenRenderables().add(((GuiGraphicsExtractor, i, j, f) -> {
             if (scrolledList.get() > 0)
-                scrollRenderer.renderScroll(guiGraphics, ScreenDirection.UP, this.leftPos + this.listWidth - 29, this.topPos + this.listHeight - 8);
+                scrollRenderer.renderScroll(GuiGraphicsExtractor, ScreenDirection.UP, this.leftPos + this.listWidth - 29 + verticalScrollArrowOffsetX, this.topPos + this.listHeight + scrollArrowYOffset + verticalScrollArrowOffsetY, LegacyScrollRenderer.SCROLLS[ScreenDirection.UP.ordinal()], verticalScrollArrowWidth, verticalScrollArrowHeight);
             if (canScrollDown)
-                scrollRenderer.renderScroll(guiGraphics, ScreenDirection.DOWN, this.leftPos + this.listWidth - 13, this.topPos + this.listHeight - 8);
+                scrollRenderer.renderScroll(GuiGraphicsExtractor, ScreenDirection.DOWN, this.leftPos + this.listWidth - 13 + verticalScrollArrowOffsetX, this.topPos + this.listHeight + scrollArrowYOffset + verticalScrollArrowOffsetY, LegacyScrollRenderer.SCROLLS[ScreenDirection.DOWN.ordinal()], verticalScrollArrowWidth, verticalScrollArrowHeight);
         }));
         canScrollDown = false;
         int yDiff = 0;
@@ -210,7 +222,12 @@ public class RenderableVList {
         renderablesCount = 0;
         for (int i = scrolledList.get(); i < renderables.size(); i++) {
             Renderable r = renderables.get(i);
-            if (r instanceof TickBox tick) tick.updateHeight();
+            if (getScreen() instanceof Access access)
+                access.initRenderableVListEntry(this, r);
+            if (r instanceof RenderableVListEntry widget)
+                widget.initRenderable(this);
+            if (r instanceof TickBox tickBox)
+                tickBox.updateHeight();
             if (!allowScroll || !(r instanceof LayoutElement l) || yDiff + l.getHeight() + (i == renderables.size() - 1 && scrolledList.get() == 0 ? 0 : 12) <= this.listHeight) {
                 if (r instanceof LayoutElement l) {
                     boolean changeRow = forceWidth || xDiff + l.getWidth() > this.listWidth;
@@ -241,7 +258,8 @@ public class RenderableVList {
         if (forceWidth) return scroll;
         int xDiff = 0;
         int rowAmount = 0;
-        for (int i = scrolledList.get(); i < scrolledList.get() + renderablesCount; i++) {
+        int end = Math.min(renderables.size(), scrolledList.get() + renderablesCount);
+        for (int i = scrolledList.get(); i < end; i++) {
             if (renderables.get(i) instanceof LayoutElement e)
                 xDiff += (xDiff == 0 ? 0 : layoutSeparation.apply(e)) + e.getWidth();
             rowAmount += scroll;
@@ -263,6 +281,33 @@ public class RenderableVList {
                 accessor.reloadUI();
             }
         }
+    }
+
+    public void revealRenderable(Renderable renderable) {
+        if (renderable == null) return;
+        revealRenderable(renderables.indexOf(renderable));
+    }
+
+    private void revealRenderable(int index) {
+        if (listHeight <= 0) return;
+        if (index < 0 || index >= renderables.size()) return;
+        int visibleCount = Math.max(1, renderablesCount);
+        int scroll = scrolledList.get();
+        if (index < scroll) {
+            scroll = index;
+        } else if (index >= scroll + visibleCount) {
+            scroll = index - visibleCount + 1;
+        }
+        scroll = Math.max(0, Math.min(scroll, renderables.size() - 1));
+        if (scroll != scrolledList.get()) {
+            scrolledList.set(scroll);
+            accessor.reloadUI();
+        }
+    }
+
+    public void resetScroll() {
+        scrolledList.set(0);
+        canScrollDown = false;
     }
 
     public boolean isHovered(double x, double y) {
@@ -306,11 +351,7 @@ public class RenderableVList {
                     if (canScrollDown) {
                         while (canScrollDown && isDirectionFocused(ScreenDirection.DOWN, true)) mouseScrolled(true);
                     } else if (cyclic) {
-                        if (path == null && scrolledList.get() > 0) {
-                            scrolledList.set(0);
-                            accessor.reloadUI();
-                            setLastFocusInDirection(ScreenDirection.DOWN);
-                        }
+                        if (path == null && focusEdgeRenderable(false)) return true;
                     } else if (path == null) return true;
                 }
             }
@@ -321,10 +362,7 @@ public class RenderableVList {
                         while (scrolledList.get() > 0 && isDirectionFocused(ScreenDirection.UP, true))
                             mouseScrolled(false);
                     } else if (cyclic) {
-                        if (path == null) {
-                            while (canScrollDown)
-                                mouseScrolled(true);
-                        }
+                        if (path == null && focusEdgeRenderable(true)) return true;
                     } else if (path == null) return true;
                 }
             }
@@ -389,11 +427,7 @@ public class RenderableVList {
             }
         }
 
-        default void initRenderableVListHeight(int height) {
-            for (Renderable renderable : getRenderableVList().renderables) {
-                if (renderable instanceof AbstractWidget widget)
-                    widget.setHeight(getRenderableVList().accessor.getInteger("buttonsHeight", height));
-            }
+        default void initRenderableVListEntry(RenderableVList renderableVList, Renderable renderable) {
         }
 
         List<RenderableVList> getRenderableVLists();
@@ -406,6 +440,32 @@ public class RenderableVList {
                 if (renderableVList.isHovered(x, y)) return renderableVList;
             }
             return null;
+        }
+    }
+
+    public static class LayoutText extends SimpleLayoutRenderable implements RenderableVListEntry {
+        public final Component text;
+        public final Supplier<Integer> color;
+        public final Supplier<Integer> heightSupplier;
+
+        public LayoutText(Component text, Supplier<Integer> color) {
+            this(text, color, () -> LegacyOptions.getUIMode().isSD() ? 9 : 13);
+        }
+
+        public LayoutText(Component text, Supplier<Integer> color, Supplier<Integer> height) {
+            this.text = text;
+            this.color = color;
+            this.heightSupplier = height;
+        }
+
+        @Override
+        public void extractRenderState(GuiGraphicsExtractor GuiGraphicsExtractor, int i, int j, float f) {
+            LegacyFontUtil.applySDFont(b -> GuiGraphicsExtractor.text(Minecraft.getInstance().font, text, this.getX() + 1, this.getY() + (LegacyOptions.getUIMode().isSD() ? 2 : 4), color.get(), false));
+        }
+
+        @Override
+        public void initRenderable(RenderableVList list) {
+            this.height = heightSupplier.get();
         }
     }
 }

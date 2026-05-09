@@ -1,20 +1,22 @@
 package wily.legacy.mixin.base.client.inventory;
 
 import com.llamalad7.mixinextras.injector.ModifyExpressionValue;
-import net.minecraft.client.gui.GuiGraphics;
+import net.minecraft.client.gui.GuiGraphicsExtractor;
 import net.minecraft.client.gui.navigation.ScreenPosition;
-import net.minecraft.client.gui.navigation.ScreenRectangle;
 import net.minecraft.client.gui.screens.Screen;
 import net.minecraft.client.gui.screens.inventory.AbstractContainerScreen;
 import net.minecraft.client.gui.screens.inventory.InventoryScreen;
 import net.minecraft.network.chat.Component;
-import net.minecraft.resources.ResourceLocation;
+import net.minecraft.resources.Identifier;
 import net.minecraft.world.entity.Pose;
 import net.minecraft.world.entity.player.Inventory;
 import net.minecraft.world.inventory.InventoryMenu;
 import net.minecraft.world.inventory.Slot;
 import net.minecraft.world.phys.Vec2;
 import org.spongepowered.asm.mixin.Mixin;
+import org.spongepowered.asm.mixin.Final;
+import org.spongepowered.asm.mixin.Shadow;
+import org.spongepowered.asm.mixin.Mutable;
 import org.spongepowered.asm.mixin.injection.At;
 import org.spongepowered.asm.mixin.injection.Inject;
 import org.spongepowered.asm.mixin.injection.callback.CallbackInfo;
@@ -34,9 +36,10 @@ import wily.legacy.util.client.LegacyRenderUtil;
 
 @Mixin(InventoryScreen.class)
 public abstract class InventoryScreenMixin extends AbstractContainerScreen<InventoryMenu> implements ReplaceableScreen, LegacyMenuAccess<InventoryMenu> {
-    private static final Vec2 EQUIP_SLOT_OFFSET = new Vec2(50, 0);
+
+private static final Vec2 EQUIP_SLOT_OFFSET = new Vec2(50, 0);
     private static final Vec2 EQUIP_SLOT_OFFSET_SD = new Vec2(31, 0);
-    private static final ResourceLocation[] EQUIPMENT_SLOT_SPRITES = new ResourceLocation[]{LegacySprites.HEAD_SLOT, LegacySprites.CHEST_SLOT, LegacySprites.LEGS_SLOT, LegacySprites.FEET_SLOT};
+    private static final Identifier[] EQUIPMENT_SLOT_SPRITES = new Identifier[]{LegacySprites.HEAD_SLOT, LegacySprites.CHEST_SLOT, LegacySprites.LEGS_SLOT, LegacySprites.FEET_SLOT};
 
     private boolean canReplace = true;
 
@@ -50,16 +53,16 @@ public abstract class InventoryScreenMixin extends AbstractContainerScreen<Inven
     }
 
     @Override
-    public void renderBackground(GuiGraphics guiGraphics, int i, int j, float f) {
-        renderBg(guiGraphics, f, i, j);
+    public void extractBackground(GuiGraphicsExtractor GuiGraphicsExtractor, int i, int j, float f) {
+        super.extractBackground(GuiGraphicsExtractor, i, j, f);
     }
 
     @Inject(method = "init", at = @At("HEAD"), cancellable = true)
     public void init(CallbackInfo ci) {
         ci.cancel();
         boolean sd = LegacyOptions.getUIMode().isSD();
-        imageWidth = sd ? 130 : 215;
-        imageHeight = sd ? 140 : 217;
+        ((wily.legacy.mixin.base.client.AbstractContainerScreenAccessor) this).legacy$setImageWidth(sd ? 130 : 215);
+        ((wily.legacy.mixin.base.client.AbstractContainerScreenAccessor) this).legacy$setImageHeight(sd ? 140 : 217);
         inventoryLabelX = sd ? 7 : 14;
         inventoryLabelY = sd ? 65 : 103;
         int slotsSize = sd ? 13 : 21;
@@ -89,7 +92,7 @@ public abstract class InventoryScreenMixin extends AbstractContainerScreen<Inven
             } else if (i < 9) {
                 int index = 39 - s.getContainerSlot();
                 LegacySlotDisplay.override(s, inventoryLabelX, (sd ? 9 : 14) + index * slotsSize, new LegacySlotDisplay() {
-                    public ResourceLocation getIconSprite() {
+                    public Identifier getIconSprite() {
                         return s.getItem().isEmpty() ? EQUIPMENT_SLOT_SPRITES[index] : null;
                     }
 
@@ -112,7 +115,7 @@ public abstract class InventoryScreenMixin extends AbstractContainerScreen<Inven
                         return LegacyOptions.hasClassicCrafting() ? Vec2.ZERO : sd ? EQUIP_SLOT_OFFSET_SD : EQUIP_SLOT_OFFSET;
                     }
 
-                    public ResourceLocation getIconSprite() {
+                    public Identifier getIconSprite() {
                         return s.getItem().isEmpty() ? LegacySprites.SHIELD_SLOT : null;
                     }
 
@@ -130,8 +133,8 @@ public abstract class InventoryScreenMixin extends AbstractContainerScreen<Inven
         cir.setReturnValue(new ScreenPosition(this.leftPos + (LegacyOptions.getUIMode().isSD() ? 90 : 180), topPos + (LegacyOptions.getUIMode().isSD() ? 50 : 71)));
     }
 
-    @Inject(method = "renderBg", at = @At("HEAD"), cancellable = true)
-    public void renderBg(GuiGraphics graphics, float f, int i, int j, CallbackInfo ci) {
+    @Inject(method = "extractBackground", at = @At("HEAD"), cancellable = true)
+    public void renderBg(GuiGraphicsExtractor graphics, int i, int j, float f, CallbackInfo ci) {
         ci.cancel();
         boolean sd = LegacyOptions.getUIMode().isSD();
         int playerPanelX = leftPos + (sd ? 23 : 40) + (LegacyOptions.hasClassicCrafting() ? 0 : sd ? 31 : 50);
@@ -142,18 +145,18 @@ public abstract class InventoryScreenMixin extends AbstractContainerScreen<Inven
         FactoryGuiGraphics.of(graphics).blitSprite(sd ? LegacySprites.SQUARE_ENTITY_PANEL : LegacySprites.ENTITY_PANEL, playerPanelX, playerPanelY, playerPanelWidth, playerPanelHeight);
         Pose pose = minecraft.player.getPose();
         minecraft.player.setPose(Pose.STANDING);
-        LegacyRenderUtil.renderEntityInInventoryFollowsMouse(graphics, playerPanelX, playerPanelY, playerPanelX + playerPanelWidth, playerPanelY + playerPanelHeight, sd ? 20 : 35, 0.0625f, i, j, minecraft.player);
+        LegacyRenderUtil.renderEntityInInventoryFollowsMouse(graphics, playerPanelX + 2, playerPanelY + 2, playerPanelX + playerPanelWidth - 2, playerPanelY + playerPanelHeight - 2, sd ? 20 : 35, 0.0625f, i, j, minecraft.player);
         minecraft.player.setPose(pose);
         if (LegacyOptions.hasClassicCrafting()) {
-            LegacyFontUtil.applySDFont(b -> graphics.drawString(this.font, this.title, leftPos + (sd ? 64 : 111), topPos + (sd ? 9 : 16), CommonColor.INVENTORY_GRAY_TEXT.get(), false));
+            LegacyFontUtil.applySDFont(b -> graphics.text(this.font, this.title, leftPos + (sd ? 64 : 111), topPos + (sd ? 9 : 16), CommonColor.GRAY_TEXT.get(), false));
             FactoryGuiGraphics.of(graphics).blitSprite(LegacySprites.SMALL_ARROW, leftPos + (sd ? 92 : 158), topPos + (sd ? 24 : 42), 16, 14);
         }
     }
 
-    @Inject(method = "renderLabels", at = @At("HEAD"), cancellable = true)
-    public void renderLabels(GuiGraphics guiGraphics, int i, int j, CallbackInfo ci) {
+    @Inject(method = "extractLabels", at = @At("HEAD"), cancellable = true)
+    public void extractLabels(GuiGraphicsExtractor GuiGraphicsExtractor, int i, int j, CallbackInfo ci) {
         ci.cancel();
-        LegacyFontUtil.applySDFont(b -> guiGraphics.drawString(this.font, this.playerInventoryTitle, this.inventoryLabelX, this.inventoryLabelY, CommonColor.INVENTORY_GRAY_TEXT.get(), false));
+        LegacyFontUtil.applySDFont(b -> GuiGraphicsExtractor.text(this.font, this.playerInventoryTitle, this.inventoryLabelX, this.inventoryLabelY, CommonColor.GRAY_TEXT.get(), false));
     }
 
     public boolean canReplace() {

@@ -12,11 +12,10 @@ import net.minecraft.CrashReport;
 import net.minecraft.SharedConstants;
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.gui.Font;
-import net.minecraft.client.gui.GuiGraphics;
+import net.minecraft.client.gui.GuiGraphicsExtractor;
 import net.minecraft.client.gui.components.AbstractButton;
 import net.minecraft.client.gui.components.Button;
 import net.minecraft.client.gui.components.toasts.SystemToast;
-import net.minecraft.client.gui.narration.NarrationElementOutput;
 import net.minecraft.client.gui.screens.*;
 import net.minecraft.client.input.InputWithModifiers;
 import net.minecraft.client.input.KeyEvent;
@@ -24,7 +23,7 @@ import net.minecraft.client.input.MouseButtonEvent;
 import net.minecraft.network.chat.CommonComponents;
 import net.minecraft.network.chat.Component;
 import net.minecraft.network.chat.MutableComponent;
-import net.minecraft.resources.ResourceLocation;
+import net.minecraft.resources.Identifier;
 import net.minecraft.world.level.storage.LevelStorageException;
 import net.minecraft.world.level.storage.LevelStorageSource;
 import net.minecraft.world.level.storage.LevelSummary;
@@ -36,7 +35,6 @@ import org.slf4j.Logger;
 import wily.factoryapi.FactoryAPI;
 import wily.factoryapi.base.client.FactoryGuiGraphics;
 import wily.factoryapi.base.client.UIAccessor;
-import wily.factoryapi.util.FactoryScreenUtil;
 import wily.legacy.Legacy4J;
 import wily.legacy.client.LegacyOptions;
 import wily.legacy.client.LegacySaveCache;
@@ -58,14 +56,14 @@ import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.CompletionException;
 
 public class SaveRenderableList extends RenderableVList {
-    static final ResourceLocation ERROR_HIGHLIGHTED = FactoryAPI.createVanillaLocation("world_list/error_highlighted");
-    static final ResourceLocation ERROR = FactoryAPI.createVanillaLocation("world_list/error");
-    static final ResourceLocation MARKED_JOIN_HIGHLIGHTED = FactoryAPI.createVanillaLocation("world_list/marked_join_highlighted");
-    static final ResourceLocation MARKED_JOIN = FactoryAPI.createVanillaLocation("world_list/marked_join");
-    static final ResourceLocation WARNING_HIGHLIGHTED = FactoryAPI.createVanillaLocation("world_list/warning_highlighted");
-    static final ResourceLocation WARNING = FactoryAPI.createVanillaLocation("world_list/warning");
-    static final ResourceLocation JOIN_HIGHLIGHTED = FactoryAPI.createVanillaLocation("world_list/join_highlighted");
-    static final ResourceLocation JOIN = FactoryAPI.createVanillaLocation("world_list/join");
+    static final Identifier ERROR_HIGHLIGHTED = FactoryAPI.createVanillaLocation("world_list/error_highlighted");
+    static final Identifier ERROR = FactoryAPI.createVanillaLocation("world_list/error");
+    static final Identifier MARKED_JOIN_HIGHLIGHTED = FactoryAPI.createVanillaLocation("world_list/marked_join_highlighted");
+    static final Identifier MARKED_JOIN = FactoryAPI.createVanillaLocation("world_list/marked_join");
+    static final Identifier WARNING_HIGHLIGHTED = FactoryAPI.createVanillaLocation("world_list/warning_highlighted");
+    static final Identifier WARNING = FactoryAPI.createVanillaLocation("world_list/warning");
+    static final Identifier JOIN_HIGHLIGHTED = FactoryAPI.createVanillaLocation("world_list/join_highlighted");
+    static final Identifier JOIN = FactoryAPI.createVanillaLocation("world_list/join");
     static final Logger LOGGER = LogUtils.getLogger();
     static final Component FROM_NEWER_TOOLTIP_1 = Component.translatable("selectWorld.tooltip.fromNewerVersion1").withStyle(ChatFormatting.RED);
     static final Component FROM_NEWER_TOOLTIP_2 = Component.translatable("selectWorld.tooltip.fromNewerVersion2").withStyle(ChatFormatting.RED);
@@ -249,7 +247,8 @@ public class SaveRenderableList extends RenderableVList {
     public void loadWorld(LevelSummary summary) {
         SaveRenderableList.this.reloadSaveList();
         if (LegacyOptions.directSaveLoad.get()) {
-            LegacySaveCache.copySaveBtwSources(LoadSaveScreen.getSummaryAccess(Minecraft.getInstance().getLevelSource(), summary), LegacySaveCache.getLevelStorageSource());
+            if (LegacyOptions.saveCache.get())
+                LegacySaveCache.copySaveBtwSources(LoadSaveScreen.getSummaryAccess(Minecraft.getInstance().getLevelSource(), summary), LegacySaveCache.getLevelStorageSource());
             LoadSaveScreen.loadWorld(getScreen(), minecraft, LegacySaveCache.getLevelStorageSource(), summary);
         } else minecraft.setScreen(new LoadSaveScreen(getScreen(), summary, LegacySaveCache.getLevelStorageSource()) {
             @Override
@@ -274,7 +273,7 @@ public class SaveRenderableList extends RenderableVList {
         minecraft.setScreen(getScreen());
     }
 
-    public class SaveButton extends CreationList.ContentButton implements ControlTooltip.ActionHolder {
+    public class SaveButton extends IconButton implements ControlTooltip.ActionHolder {
         public final LevelSummary summary;
 
         public SaveButton(int i, int j, int k, int l, LevelSummary summary) {
@@ -317,54 +316,54 @@ public class SaveRenderableList extends RenderableVList {
         }
 
         @Override
-        public void renderIcon(GuiGraphics guiGraphics, int mouseX, int mouseY, int x, int y, int width, int height) {
-            FactoryGuiGraphics.of(guiGraphics).blit(iconCache.getUnchecked(summary).textureLocation(), getX() + x, getY() + y, 0, 0, width, height, width, height);
+        public void renderIcon(GuiGraphicsExtractor GuiGraphicsExtractor, int mouseX, int mouseY, int x, int y, int width, int height) {
+            FactoryGuiGraphics.of(GuiGraphicsExtractor).blit(iconCache.getUnchecked(summary).textureLocation(), getX() + x, getY() + y, 0, 0, width, height, width, height);
         }
 
         @Override
-        public void renderIconHighlight(GuiGraphics guiGraphics, int mouseX, int mouseY, int x, int y, int width, int height) {
-            super.renderIconHighlight(guiGraphics, mouseX, mouseY, x, y, width, height);
+        public void renderIconHighlight(GuiGraphicsExtractor GuiGraphicsExtractor, int mouseX, int mouseY, int x, int y, int width, int height) {
+            super.renderIconHighlight(GuiGraphicsExtractor, mouseX, mouseY, x, y, width, height);
 
             boolean hoverIcon = LegacyRenderUtil.isMouseOver(mouseX, mouseY, getX() + x, getY() + y, width, height);
-            ResourceLocation resourceLocation = hoverIcon ? JOIN_HIGHLIGHTED : JOIN;
-            ResourceLocation resourceLocation2 = hoverIcon ? WARNING_HIGHLIGHTED : WARNING;
-            ResourceLocation resourceLocation3 = hoverIcon ? ERROR_HIGHLIGHTED : ERROR;
-            ResourceLocation resourceLocation4 = hoverIcon ? MARKED_JOIN_HIGHLIGHTED : MARKED_JOIN;
+            Identifier resourceLocation = hoverIcon ? JOIN_HIGHLIGHTED : JOIN;
+            Identifier resourceLocation2 = hoverIcon ? WARNING_HIGHLIGHTED : WARNING;
+            Identifier resourceLocation3 = hoverIcon ? ERROR_HIGHLIGHTED : ERROR;
+            Identifier resourceLocation4 = hoverIcon ? MARKED_JOIN_HIGHLIGHTED : MARKED_JOIN;
             if (summary instanceof LevelSummary.SymlinkLevelSummary/*? if >=1.20.3 {*/ || summary instanceof LevelSummary.CorruptedLevelSummary/*?}*/) {
-                FactoryGuiGraphics.of(guiGraphics).blitSprite(resourceLocation3, getX() + x, getY() + y, width, height);
-                FactoryGuiGraphics.of(guiGraphics).blitSprite(resourceLocation4, getX() + x, getY() + y, width, height);
+                FactoryGuiGraphics.of(GuiGraphicsExtractor).blitSprite(resourceLocation3, getX() + x, getY() + y, width, height);
+                FactoryGuiGraphics.of(GuiGraphicsExtractor).blitSprite(resourceLocation4, getX() + x, getY() + y, width, height);
                 return;
             }
             if (summary.isLocked()) {
-                FactoryGuiGraphics.of(guiGraphics).blitSprite(resourceLocation3, getX() + x, getY() + y, width, height);
+                FactoryGuiGraphics.of(GuiGraphicsExtractor).blitSprite(resourceLocation3, getX() + x, getY() + y, width, height);
                 if (hoverIcon) {
-                    guiGraphics.setTooltipForNextFrame(minecraft.font, minecraft.font.split(WORLD_LOCKED_TOOLTIP, 175), mouseX, mouseY);
+                    GuiGraphicsExtractor.setTooltipForNextFrame(minecraft.font, minecraft.font.split(WORLD_LOCKED_TOOLTIP, 175), mouseX, mouseY);
                 }
             } else if (summary.requiresManualConversion()) {
-                FactoryGuiGraphics.of(guiGraphics).blitSprite(resourceLocation3, getX() + x, getY() + y, width, height);
+                FactoryGuiGraphics.of(GuiGraphicsExtractor).blitSprite(resourceLocation3, getX() + x, getY() + y, width, height);
                 if (hoverIcon) {
-                    guiGraphics.setTooltipForNextFrame(minecraft.font, minecraft.font.split(WORLD_REQUIRES_CONVERSION, 175), mouseX, mouseY);
+                    GuiGraphicsExtractor.setTooltipForNextFrame(minecraft.font, minecraft.font.split(WORLD_REQUIRES_CONVERSION, 175), mouseX, mouseY);
                 }
             } else if (!summary.isCompatible()) {
-                FactoryGuiGraphics.of(guiGraphics).blitSprite(resourceLocation3, getX() + x, getY() + y, width, height);
+                FactoryGuiGraphics.of(GuiGraphicsExtractor).blitSprite(resourceLocation3, getX() + x, getY() + y, width, height);
                 if (hoverIcon) {
-                    guiGraphics.setTooltipForNextFrame(minecraft.font, minecraft.font.split(INCOMPATIBLE_VERSION_TOOLTIP, 175), mouseX, mouseY);
+                    GuiGraphicsExtractor.setTooltipForNextFrame(minecraft.font, minecraft.font.split(INCOMPATIBLE_VERSION_TOOLTIP, 175), mouseX, mouseY);
                 }
             } else if (summary./*? if >1.20.2 {*/shouldBackup/*?} else {*//*markVersionInList*//*?}*/()) {
-                FactoryGuiGraphics.of(guiGraphics).blitSprite(resourceLocation4, getX() + x, getY() + y, width, height);
+                FactoryGuiGraphics.of(GuiGraphicsExtractor).blitSprite(resourceLocation4, getX() + x, getY() + y, width, height);
                 if (summary./*? if >1.20.2 {*/isDowngrade/*?} else {*//*requiresManualConversion*//*?}*/()) {
-                    FactoryGuiGraphics.of(guiGraphics).blitSprite(resourceLocation3, getX() + x, getY() + y, width, height);
+                    FactoryGuiGraphics.of(GuiGraphicsExtractor).blitSprite(resourceLocation3, getX() + x, getY() + y, width, height);
                     if (hoverIcon) {
-                        guiGraphics.setTooltipForNextFrame(minecraft.font, ImmutableList.of(FROM_NEWER_TOOLTIP_1.getVisualOrderText(), FROM_NEWER_TOOLTIP_2.getVisualOrderText()), mouseX, mouseY);
+                        GuiGraphicsExtractor.setTooltipForNextFrame(minecraft.font, ImmutableList.of(FROM_NEWER_TOOLTIP_1.getVisualOrderText(), FROM_NEWER_TOOLTIP_2.getVisualOrderText()), mouseX, mouseY);
                     }
                 } else if (!SharedConstants.getCurrentVersion().stable()) {
-                    FactoryGuiGraphics.of(guiGraphics).blitSprite(resourceLocation2, getX() + x, getY() + y, width, height);
+                    FactoryGuiGraphics.of(GuiGraphicsExtractor).blitSprite(resourceLocation2, getX() + x, getY() + y, width, height);
                     if (hoverIcon) {
-                        guiGraphics.setTooltipForNextFrame(minecraft.font, ImmutableList.of(SNAPSHOT_TOOLTIP_1.getVisualOrderText(), SNAPSHOT_TOOLTIP_2.getVisualOrderText()), mouseX, mouseY);
+                        GuiGraphicsExtractor.setTooltipForNextFrame(minecraft.font, ImmutableList.of(SNAPSHOT_TOOLTIP_1.getVisualOrderText(), SNAPSHOT_TOOLTIP_2.getVisualOrderText()), mouseX, mouseY);
                     }
                 }
             } else {
-                FactoryGuiGraphics.of(guiGraphics).blitSprite(resourceLocation, getX() + x, getY() + y, width, height);
+                FactoryGuiGraphics.of(GuiGraphicsExtractor).blitSprite(resourceLocation, getX() + x, getY() + y, width, height);
             }
         }
 

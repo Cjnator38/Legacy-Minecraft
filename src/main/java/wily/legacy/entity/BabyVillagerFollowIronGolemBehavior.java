@@ -3,8 +3,8 @@ package wily.legacy.entity;
 import com.google.common.collect.ImmutableMap;
 import net.minecraft.server.level.ServerLevel;
 import net.minecraft.world.entity.ai.behavior.Behavior;
-import net.minecraft.world.entity.animal.IronGolem;
-import net.minecraft.world.entity.npc.Villager;
+import net.minecraft.world.entity.animal.golem.IronGolem;
+import net.minecraft.world.entity.npc.villager.Villager;
 
 import java.util.List;
 
@@ -47,7 +47,7 @@ public class BabyVillagerFollowIronGolemBehavior extends Behavior<Villager> {
 
     @Override
     protected void start(ServerLevel serverLevel, Villager livingEntity, long l) {
-        this.takeGolemRoseTick = serverLevel.random.nextInt(320);
+        this.takeGolemRoseTick = serverLevel.getRandom().nextInt(320);
         this.tookGolemRose = false;
         livingEntity.getNavigation().stop();
     }

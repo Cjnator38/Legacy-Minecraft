@@ -4,19 +4,19 @@ import net.minecraft.client.gui.components.Button;
 import net.minecraft.client.gui.screens.Screen;
 import net.minecraft.client.input.KeyEvent;
 import net.minecraft.network.chat.CommonComponents;
-import net.minecraft.resources.ResourceLocation;
+import net.minecraft.resources.Identifier;
 import wily.factoryapi.FactoryAPI;
 import wily.legacy.Legacy4J;
 import wily.legacy.Legacy4JClient;
 import wily.legacy.util.LegacyComponents;
 
 public class PatchNotesScreen extends PanelBackgroundScreen {
-    public static final ResourceLocation NEWER_VERSION = Legacy4J.createModLocation("ui_definitions/newer_version_notes.json");
-    public static final ResourceLocation NEWER_MINECRAFT_VERSION = FactoryAPI.createVanillaLocation("ui_definitions/newer_version_notes.json");
+    public static final Identifier NEWER_VERSION = Legacy4J.createModLocation("ui_definitions/newer_version_notes.json");
+    public static final Identifier NEWER_MINECRAFT_VERSION = FactoryAPI.createVanillaLocation("ui_definitions/newer_version_notes.json");
     protected final ScrollableRenderer scrollableRenderer = new ScrollableRenderer();
-    private final ResourceLocation uiDefinitionID;
+    private final Identifier uiDefinitionID;
 
-    public PatchNotesScreen(Screen parent, ResourceLocation uiDefinitionID) {
+    public PatchNotesScreen(Screen parent, Identifier uiDefinitionID) {
         super(parent, s -> Panel.centered(s, 370, 237, 0, 24), CommonComponents.EMPTY);
         this.uiDefinitionID = uiDefinitionID;
     }
@@ -56,10 +56,14 @@ public class PatchNotesScreen extends PanelBackgroundScreen {
         renderer.tooltips.remove(2);
     }
 
+    protected void addFooterButtons() {
+        accessor.putWidget("acceptButton", addRenderableWidget(Button.builder(LegacyComponents.ACCEPT, b -> onClose()).bounds(panel.getX() + (panel.getWidth() - 200) / 2, panel.getY() + panel.getHeight() - 30, 200, 20).build()));
+    }
+
     @Override
     protected void init() {
         accessor.putStaticElement("scrollable_renderer", scrollableRenderer);
         super.init();
-        addRenderableWidget(Button.builder(LegacyComponents.ACCEPT, b -> onClose()).bounds(panel.getX() + (panel.getWidth() - 200) / 2, panel.getY() + panel.getHeight() - 30, 200, 20).build());
+        addFooterButtons();
     }
 }

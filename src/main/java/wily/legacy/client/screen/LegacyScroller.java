@@ -1,9 +1,9 @@
 package wily.legacy.client.screen;
 
-import net.minecraft.client.gui.GuiGraphics;
+import net.minecraft.client.gui.GuiGraphicsExtractor;
 import net.minecraft.client.gui.navigation.ScreenDirection;
 import net.minecraft.client.input.MouseButtonEvent;
-import net.minecraft.world.phys.Vec3;
+import net.minecraft.world.phys.Vec2;
 import wily.factoryapi.base.Stocker;
 import wily.factoryapi.base.client.FactoryGuiGraphics;
 import wily.factoryapi.base.client.SimpleLayoutRenderable;
@@ -13,8 +13,9 @@ import wily.legacy.util.client.LegacyRenderUtil;
 import java.util.function.Supplier;
 
 public abstract class LegacyScroller extends SimpleLayoutRenderable {
+    public static final float SCROLLER_HEIGHT_OFFSET = 13.5f;
     public final LegacyScrollRenderer scrollRenderer;
-    public Vec3 offset = Vec3.ZERO;
+    public Vec2 offset = Vec2.ZERO;
     public boolean dragged = false;
 
     public LegacyScroller(LegacyScrollRenderer scrollRenderer) {
@@ -37,34 +38,34 @@ public abstract class LegacyScroller extends SimpleLayoutRenderable {
     }
 
     public float getScrollerHeight() {
-        return getHeight() - 13.5f;
+        return getHeight() - SCROLLER_HEIGHT_OFFSET;
     }
 
-    public void offset(Vec3 offset) {
+    public void offset(Vec2 offset) {
         this.offset = offset;
     }
 
     public abstract Stocker.Sizeable getScroll();
 
     @Override
-    public void render(GuiGraphics guiGraphics, int i, int j, float f) {
-        guiGraphics.pose().pushMatrix();
-        guiGraphics.pose().translate(this.getX() + (float) offset.x, getY() + (float) offset.y);
+    public void extractRenderState(GuiGraphicsExtractor GuiGraphicsExtractor, int i, int j, float f) {
+        GuiGraphicsExtractor.pose().pushMatrix();
+        GuiGraphicsExtractor.pose().translate(this.getX() + offset.x, getY() + offset.y);
         Stocker.Sizeable scroll = getScroll();
         if (scroll.max > 0) {
-            guiGraphics.pose().pushMatrix();
-            guiGraphics.pose().translate((getWidth() - 13) / 2f, 0);
+            GuiGraphicsExtractor.pose().pushMatrix();
+            GuiGraphicsExtractor.pose().translate((getWidth() - 13) / 2f, 0);
             if (scroll.get() != scroll.max)
-                scrollRenderer.renderScroll(guiGraphics, ScreenDirection.DOWN, 0, getHeight() + 4);
+                scrollRenderer.renderScroll(GuiGraphicsExtractor, ScreenDirection.DOWN, 0, getHeight() + 4);
             if (scroll.get() > 0)
-                scrollRenderer.renderScroll(guiGraphics, ScreenDirection.UP, 0, -11);
-            guiGraphics.pose().popMatrix();
-        } else FactoryGuiGraphics.of(guiGraphics).setBlitColor(1.0f, 1.0f, 1.0f, 0.5f);
-        FactoryGuiGraphics.of(guiGraphics).blitSprite(LegacySprites.SQUARE_RECESSED_PANEL, 0, 0, width, height);
-        guiGraphics.pose().translate(-2f, -1f + (scroll.max > 0 ? scroll.get() * getScrollerHeight() / scroll.max : 0));
-        FactoryGuiGraphics.of(guiGraphics).blitSprite(LegacySprites.PANEL, 0, 0, 16, 16);
-        FactoryGuiGraphics.of(guiGraphics).clearBlitColor();
-        guiGraphics.pose().popMatrix();
+                scrollRenderer.renderScroll(GuiGraphicsExtractor, ScreenDirection.UP, 0, -11);
+            GuiGraphicsExtractor.pose().popMatrix();
+        } else FactoryGuiGraphics.of(GuiGraphicsExtractor).setBlitColor(1.0f, 1.0f, 1.0f, 0.5f);
+        FactoryGuiGraphics.of(GuiGraphicsExtractor).blitSprite(LegacySprites.SQUARE_RECESSED_PANEL, 0, 0, width, height);
+        GuiGraphicsExtractor.pose().translate(-2f, -1f + (scroll.max > 0 ? scroll.get() * getScrollerHeight() / scroll.max : 0));
+        FactoryGuiGraphics.of(GuiGraphicsExtractor).blitSprite(LegacySprites.PANEL, 0, 0, 16, 16);
+        FactoryGuiGraphics.of(GuiGraphicsExtractor).clearBlitColor();
+        GuiGraphicsExtractor.pose().popMatrix();
     }
 
     @Override

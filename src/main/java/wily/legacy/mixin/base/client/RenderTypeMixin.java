@@ -1,22 +1,42 @@
 package wily.legacy.mixin.base.client;
 
-import net.minecraft.client.renderer.RenderType;
-import org.spongepowered.asm.mixin.Final;
+import net.minecraft.client.renderer.rendertype.RenderType;
+import net.minecraft.client.renderer.rendertype.RenderTypes;
+import net.minecraft.resources.Identifier;
 import org.spongepowered.asm.mixin.Mixin;
-import org.spongepowered.asm.mixin.Shadow;
 import org.spongepowered.asm.mixin.injection.At;
-import org.spongepowered.asm.mixin.injection.ModifyArg;
+import org.spongepowered.asm.mixin.injection.Inject;
+import org.spongepowered.asm.mixin.injection.callback.CallbackInfoReturnable;
 
-import java.util.OptionalDouble;
-
-@Mixin(RenderType.class)
+@Mixin(RenderTypes.class)
 public abstract class RenderTypeMixin {
-    @Shadow
-    @Final
-    public static RenderType.CompositeRenderType LINES;
 
-    @ModifyArg(method = "<clinit>", at = @At(value = "INVOKE", target = "Lnet/minecraft/client/renderer/RenderStateShard$LineStateShard;<init>(Ljava/util/OptionalDouble;)V", ordinal = 0))
-    private static OptionalDouble init(OptionalDouble d) {
-        return OptionalDouble.of(1.0);
+    private static boolean legacy$capeWithCutout(Identifier texture) {
+        if (texture == null) return false;
+        String path = texture.getPath();
+        if (path == null) return false;
+        if (path.startsWith("runtime_capes/")) return true;
+        return path.contains("skinpacks/") && (path.contains("/capes/") || path.contains("/cape/"));
     }
+
+    @Inject(method = "entityTranslucent(Lnet/minecraft/resources/Identifier;)Lnet/minecraft/client/renderer/rendertype/RenderType;", at = @At("HEAD"), cancellable = true, require = 0)
+    private static void legacy$entityTranslucent(Identifier texture, CallbackInfoReturnable<RenderType> cir) {
+        if (legacy$capeWithCutout(texture)) cir.setReturnValue(RenderTypes.entityCutout(texture));
+    }
+
+    @Inject(method = "entityTranslucent(Lnet/minecraft/resources/Identifier;Z)Lnet/minecraft/client/renderer/rendertype/RenderType;", at = @At("HEAD"), cancellable = true, require = 0)
+    private static void legacy$entityTranslucent(Identifier texture, boolean outline, CallbackInfoReturnable<RenderType> cir) {
+        if (legacy$capeWithCutout(texture)) cir.setReturnValue(RenderTypes.entityCutout(texture));
+    }
+
+    @Inject(method = "entitySolid(Lnet/minecraft/resources/Identifier;)Lnet/minecraft/client/renderer/rendertype/RenderType;", at = @At("HEAD"), cancellable = true, require = 0)
+    private static void legacy$entitySolid(Identifier texture, CallbackInfoReturnable<RenderType> cir) {
+        if (legacy$capeWithCutout(texture)) cir.setReturnValue(RenderTypes.entityCutout(texture));
+    }
+
+    //I don't think that's needed anymore
+//    @Inject(method = "entityNoOutline(Lnet/minecraft/resources/Identifier;)Lnet/minecraft/client/renderer/rendertype/RenderType;", at = @At("HEAD"), cancellable = true, require = 0)
+//    private static void legacy$entityNoOutline(Identifier texture, CallbackInfoReturnable<RenderType> cir) {
+//        if (legacy$capeWithCutout(texture)) cir.setReturnValue(RenderTypes.entityCutout(texture));
+//    }
 }

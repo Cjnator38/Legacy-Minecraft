@@ -3,14 +3,9 @@ package wily.legacy.client.screen;
 import com.mojang.authlib.GameProfile;
 import com.mojang.blaze3d.platform.InputConstants;
 import net.minecraft.client.Minecraft;
-import net.minecraft.client.gui.Font;
-import net.minecraft.client.gui.GuiGraphics;
-import net.minecraft.client.gui.components.AbstractButton;
-import net.minecraft.client.gui.components.Button;
-import net.minecraft.client.gui.components.EditBox;
-import net.minecraft.client.gui.components.PlayerFaceRenderer;
+import net.minecraft.client.gui.GuiGraphicsExtractor;
+import net.minecraft.client.gui.components.*;
 import net.minecraft.client.gui.components.events.GuiEventListener;
-import net.minecraft.client.gui.narration.NarrationElementOutput;
 import net.minecraft.client.gui.screens.Screen;
 import net.minecraft.client.input.InputWithModifiers;
 import net.minecraft.client.input.KeyEvent;
@@ -166,13 +161,18 @@ public class ChooseUserScreen extends PanelVListScreen {
         super.panelInit();
         panelRecess.init("panelRecess");
         addRenderableOnly(panelRecess);
-        addRenderableOnly(((guiGraphics, i, j, f) -> guiGraphics.drawString(font, getTitle(), panel.getX() + (panel.getWidth() - font.width(getTitle())) / 2, panel.y + 20, CommonColor.INVENTORY_GRAY_TEXT.get(), false)));
+        addRenderableOnly(((GuiGraphicsExtractor, i, j, f) -> GuiGraphicsExtractor.text(font, getTitle(), panel.getX() + (panel.getWidth() - font.width(getTitle())) / 2, panel.y + 20, CommonColor.GRAY_TEXT.get(), false)));
 
     }
 
     @Override
+    public void initRenderableVListEntry(RenderableVList renderableVList, Renderable renderable) {
+        if (renderable instanceof AbstractWidget widget)
+            widget.setHeight(accessor.getInteger("buttonsHeight", 30));
+    }
+
+    @Override
     public void renderableVListInit() {
-        initRenderableVListHeight(30);
         getRenderableVList().init(panel.x + 15, panel.y + 32, panel.width - 30, panel.height - 50);
     }
 
@@ -191,18 +191,17 @@ public class ChooseUserScreen extends PanelVListScreen {
             minecraft.setScreen(ChooseUserScreen.this);
         })));
         for (MCAccount account : MCAccount.list) {
-            renderableVList.addRenderable(new CreationList.ContentButton(renderableVList, 0, 0, 230, 30, account.getMSARefreshToken(null).isEmpty() ? Component.translatable("legacy.menu.offline_user", account.getProfile().name()) : Component.literal(account.getProfile().name())) {
+            renderableVList.addRenderable(new IconButton(renderableVList, 0, 0, 230, 30, account.getMSARefreshToken(null).isEmpty() ? Component.translatable("legacy.menu.offline_user", account.getProfile().name()) : Component.literal(account.getProfile().name())) {
                 @Override
-                public void renderIcon(GuiGraphics guiGraphics, int mouseX, int mouseY, int x, int y, int width, int height) {
-                    PlayerFaceRenderer.draw(guiGraphics, minecraft.getSkinManager().createLookup(account.getProfile(), true).get(), getX() + x, getY() + y, Math.max(width, height));
+                public void renderIcon(GuiGraphicsExtractor GuiGraphicsExtractor, int mouseX, int mouseY, int x, int y, int width, int height) {
+                    PlayerFaceExtractor.extractRenderState(GuiGraphicsExtractor, minecraft.getSkinManager().createLookup(account.getProfile(), true).get(), getX() + x, getY() + y, Math.max(width, height));
                 }
 
                 @Override
-                public void renderIconHighlight(GuiGraphics guiGraphics, int mouseX, int mouseY, int x, int y, int width, int height) {
-                    super.renderIconHighlight(guiGraphics, mouseX, mouseY, x, y, width, height);
-                    FactoryGuiGraphics.of(guiGraphics).blitSprite(LegacyRenderUtil.isMouseOver(mouseX, mouseY, getX() + x, getY() + y, width, height) ? SaveRenderableList.JOIN_HIGHLIGHTED : SaveRenderableList.JOIN, getX() + x, getY() + y, width, height);
+                public void renderIconHighlight(GuiGraphicsExtractor GuiGraphicsExtractor, int mouseX, int mouseY, int x, int y, int width, int height) {
+                    super.renderIconHighlight(GuiGraphicsExtractor, mouseX, mouseY, x, y, width, height);
+                    FactoryGuiGraphics.of(GuiGraphicsExtractor).blitSprite(LegacyRenderUtil.isMouseOver(mouseX, mouseY, getX() + x, getY() + y, width, height) ? SaveRenderableList.JOIN_HIGHLIGHTED : SaveRenderableList.JOIN, getX() + x, getY() + y, width, height);
                 }
-
 
                 @Override
                 public boolean mouseClicked(MouseButtonEvent event, boolean bl) {

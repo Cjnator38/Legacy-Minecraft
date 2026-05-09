@@ -2,11 +2,16 @@ package wily.legacy.network;
 
 import com.mojang.authlib.GameProfile;
 import net.minecraft.network.FriendlyByteBuf;
+import net.minecraft.network.chat.Component;
+import net.minecraft.resources.Identifier;
 import net.minecraft.server.MinecraftServer;
 import net.minecraft.server.level.ServerPlayer;
+import net.minecraft.server.permissions.Permissions;
 import net.minecraft.world.entity.player.Player;
-import net.minecraft.world.level.GameRules;
 import net.minecraft.world.level.GameType;
+import net.minecraft.world.level.gamerules.GameRule;
+import net.minecraft.world.level.gamerules.GameRuleTypeVisitor;
+import net.minecraft.world.level.gamerules.GameRules;
 import wily.factoryapi.FactoryAPIPlatform;
 import wily.factoryapi.base.network.CommonNetwork;
 import wily.legacy.Legacy4J;
@@ -22,7 +27,7 @@ public record PlayerInfoSync(Sync sync, UUID player) implements CommonNetwork.Pa
     public static final CommonNetwork.Identifier<PlayerInfoSync> ID = CommonNetwork.Identifier.create(Legacy4J.createModLocation("player_info_sync_c2s"), PlayerInfoSync::new);
 
     public PlayerInfoSync(CommonNetwork.PlayBuf buf) {
-        this(buf.get().readEnum(Sync.class), buf.get().readUUID());
+        this(Sync.byId(buf.get().readVarInt()), buf.get().readUUID());
     }
 
     public PlayerInfoSync(Sync sync, Player player) {
@@ -61,15 +66,16 @@ public record PlayerInfoSync(Sync sync, UUID player) implements CommonNetwork.Pa
         return new PlayerInfoSync(mayFlySurvival ? Sync.ENABLE_MAY_FLY_SURVIVAL : Sync.DISABLE_MAY_FLY_SURVIVAL, profile);
     }
 
-    public static Map<String, Object> getWritableGameRules(GameRules gameRules) {
-        Map<String, Object> rules = new HashMap<>();
-        gameRules.visitGameRuleTypes(new GameRules.GameRuleTypeVisitor() {
-            public void visitBoolean(GameRules.Key<GameRules.BooleanValue> key, GameRules.Type<GameRules.BooleanValue> type) {
-                rules.put(key.getId(), gameRules.getRule(key).get());
-            }
+    public static PlayerInfoSync invisibility(boolean invisible, GameProfile profile) {
+        return new PlayerInfoSync(invisible ? Sync.ENABLE_INVISIBILITY : Sync.DISABLE_INVISIBILITY, profile);
+    }
 
-            public void visitInteger(GameRules.Key<GameRules.IntegerValue> key, GameRules.Type<GameRules.IntegerValue> type) {
-                rules.put(key.getId(), gameRules.getRule(key).get());
+    public static Map<Identifier, Integer> getWritableGameRules(GameRules gameRules) {
+        Map<Identifier, Integer> rules = new HashMap<>();
+        gameRules.visitGameRuleTypes(new GameRuleTypeVisitor() {
+            @Override
+            public <T> void visit(GameRule<T> gameRule) {
+                rules.put(gameRule.getIdentifier(), gameRule.getCommandResult(gameRules.get(gameRule)));
             }
         });
         return rules;
@@ -77,7 +83,7 @@ public record PlayerInfoSync(Sync sync, UUID player) implements CommonNetwork.Pa
 
     @Override
     public void encode(CommonNetwork.PlayBuf buf) {
-        buf.get().writeEnum(sync);
+        buf.get().writeVarInt(sync.id());
         buf.get().writeUUID(player);
     }
 
@@ -85,6 +91,7 @@ public record PlayerInfoSync(Sync sync, UUID player) implements CommonNetwork.Pa
     public void apply(Context context) {
         if (context.player() instanceof ServerPlayer sp) {
             ServerPlayer affectPlayer;
+            boolean shouldSyncPlayerInfo = false;
             if (sp.getUUID().equals(player)) {
                 switch (sync) {
                     case ASK_ALL ->
@@ -100,14 +107,39 @@ public record PlayerInfoSync(Sync sync, UUID player) implements CommonNetwork.Pa
                 affectPlayer = sp;
             } else affectPlayer = FactoryAPIPlatform.getEntityServer(sp).getPlayerList().getPlayer(player);
             if (affectPlayer == null) return;
-            if (sp.hasPermissions(2)) {
+            if (sp.permissions().hasPermission(Permissions.COMMANDS_GAMEMASTER)) {
                 switch (sync) {
-                    case DISABLE_EXHAUSTION, ENABLE_EXHAUSTION ->
-                            ((LegacyPlayerInfo) affectPlayer).setDisableExhaustion(sync == Sync.DISABLE_EXHAUSTION);
-                    case ENABLE_MAY_FLY_SURVIVAL, DISABLE_MAY_FLY_SURVIVAL ->
-                            LegacyPlayerInfo.setAndUpdateMayFlySurvival(affectPlayer, sync == Sync.ENABLE_MAY_FLY_SURVIVAL, true);
+                    case DISABLE_EXHAUSTION, ENABLE_EXHAUSTION -> {
+                        boolean disableExhaustion = sync == Sync.DISABLE_EXHAUSTION;
+                        LegacyPlayerInfo info = (LegacyPlayerInfo) affectPlayer;
+                        if (info.isExhaustionDisabled() != disableExhaustion) {
+                            info.setDisableExhaustion(disableExhaustion);
+                            affectPlayer.sendSystemMessage(Component.translatable(disableExhaustion ? "legacy.menu.host_options.player.disableExhaustion.enabled" : "legacy.menu.host_options.player.disableExhaustion.disabled"), false);
+                            shouldSyncPlayerInfo = true;
+                        }
+                    }
+                    case ENABLE_MAY_FLY_SURVIVAL, DISABLE_MAY_FLY_SURVIVAL -> {
+                        boolean mayFlySurvival = sync == Sync.ENABLE_MAY_FLY_SURVIVAL;
+                        LegacyPlayerInfo info = (LegacyPlayerInfo) affectPlayer;
+                        if (info.mayFlySurvival() != mayFlySurvival) {
+                            LegacyPlayerInfo.setAndUpdateMayFlySurvival(affectPlayer, mayFlySurvival, true);
+                            affectPlayer.sendSystemMessage(Component.translatable(mayFlySurvival ? "legacy.menu.host_options.player.mayFly.enabled" : "legacy.menu.host_options.player.mayFly.disabled"), false);
+                            shouldSyncPlayerInfo = true;
+                        }
+                    }
+                    case ENABLE_INVISIBILITY, DISABLE_INVISIBILITY -> {
+                        boolean visible = sync == Sync.DISABLE_INVISIBILITY;
+                        LegacyPlayerInfo info = (LegacyPlayerInfo) affectPlayer;
+                        if (info.isVisible() != visible) {
+                            info.setVisibility(visible);
+                            affectPlayer.sendSystemMessage(Component.translatable(visible ? "legacy.menu.host_options.player.invisible.disabled" : "legacy.menu.host_options.player.invisible.enabled"), false);
+                            affectPlayer.sendSystemMessage(Component.translatable(visible ? "legacy.menu.host_options.player.invulnerable.disabled" : "legacy.menu.host_options.player.invulnerable.enabled"), false);
+                            shouldSyncPlayerInfo = true;
+                        }
+                    }
                 }
             }
+            if (shouldSyncPlayerInfo) syncPlayerInfo(affectPlayer);
         }
     }
 
@@ -117,31 +149,77 @@ public record PlayerInfoSync(Sync sync, UUID player) implements CommonNetwork.Pa
     }
 
     public enum Sync {
-        ASK_ALL, CLASSIC_CRAFTING, LEGACY_CRAFTING, DISABLE_EXHAUSTION, ENABLE_EXHAUSTION, ENABLE_MAY_FLY_SURVIVAL, DISABLE_MAY_FLY_SURVIVAL, CLASSIC_TRADING, LEGACY_TRADING, CLASSIC_STONECUTTING, LEGACY_STONECUTTING, CLASSIC_LOOM, LEGACY_LOOM
+        ASK_ALL(0),
+        CLASSIC_CRAFTING(1),
+        LEGACY_CRAFTING(2),
+        DISABLE_EXHAUSTION(3),
+        ENABLE_EXHAUSTION(4),
+        ENABLE_MAY_FLY_SURVIVAL(5),
+        DISABLE_MAY_FLY_SURVIVAL(6),
+        CLASSIC_TRADING(7),
+        LEGACY_TRADING(8),
+        CLASSIC_STONECUTTING(9),
+        LEGACY_STONECUTTING(10),
+        CLASSIC_LOOM(11),
+        LEGACY_LOOM(12),
+        ENABLE_INVISIBILITY(13),
+        DISABLE_INVISIBILITY(14);
+
+        private final int id;
+
+        Sync(int id) {
+            this.id = id;
+        }
+
+        public int id() {
+            return id;
+        }
+
+        public static Sync byId(int id) {
+            return switch (id) {
+                case 0 -> ASK_ALL;
+                case 1 -> CLASSIC_CRAFTING;
+                case 2 -> LEGACY_CRAFTING;
+                case 3 -> DISABLE_EXHAUSTION;
+                case 4 -> ENABLE_EXHAUSTION;
+                case 5 -> ENABLE_MAY_FLY_SURVIVAL;
+                case 6 -> DISABLE_MAY_FLY_SURVIVAL;
+                case 7 -> CLASSIC_TRADING;
+                case 8 -> LEGACY_TRADING;
+                case 9 -> CLASSIC_STONECUTTING;
+                case 10 -> LEGACY_STONECUTTING;
+                case 11 -> CLASSIC_LOOM;
+                case 12 -> LEGACY_LOOM;
+                case 13 -> ENABLE_INVISIBILITY;
+                case 14 -> DISABLE_INVISIBILITY;
+                default -> throw new IllegalArgumentException("Unknown player info sync id: " + id);
+            };
+        }
     }
 
-    public record All(Map<UUID, LegacyPlayerInfo> players, Map<String, Object> gameRules, GameType defaultGameType,
+    private static void syncPlayerInfo(ServerPlayer player) {
+        MinecraftServer server = FactoryAPIPlatform.getEntityServer(player);
+        if (server == null) return;
+        CommonNetwork.sendToPlayers(server.getPlayerList().getPlayers(), new All(Map.of(player.getUUID(), (LegacyPlayerInfo) player), Collections.emptyMap(), server.getDefaultGameType(), All.ID_S2C));
+    }
+
+    public record All(Map<UUID, LegacyPlayerInfo> players, Map<Identifier, Integer> gameRules, GameType defaultGameType,
                       CommonNetwork.Identifier<All> identifier) implements CommonNetwork.Payload {
-        public static final List<GameRules.Key<GameRules.BooleanValue>> NON_OP_GAMERULES = new ArrayList<>(List.of(GameRules.RULE_DOFIRETICK, LegacyGameRules.getTntExplodes(), GameRules.RULE_DOMOBLOOT, GameRules.RULE_DOBLOCKDROPS, GameRules.RULE_NATURAL_REGENERATION, LegacyGameRules.GLOBAL_MAP_PLAYER_ICON, LegacyGameRules.LEGACY_SWIMMING, GameRules.RULE_DO_IMMEDIATE_RESPAWN));
+        public static final List<Identifier> NON_OP_GAMERULES = new ArrayList<>(List.of(GameRules.FIRE_DAMAGE.getIdentifier(), LegacyGameRules.getTntExplodes().getIdentifier(), GameRules.MOB_DROPS.getIdentifier(), GameRules.BLOCK_DROPS.getIdentifier(), GameRules.NATURAL_HEALTH_REGENERATION.getIdentifier(), LegacyGameRules.GLOBAL_MAP_PLAYER_ICON.getId(), LegacyGameRules.LEGACY_SWIMMING.getId(), GameRules.IMMEDIATE_RESPAWN.getIdentifier()));
         public static final CommonNetwork.Identifier<All> ID_C2S = CommonNetwork.Identifier.create(Legacy4J.createModLocation("player_info_sync_all_c2s"), b -> new All(b, All.ID_C2S));
         public static final CommonNetwork.Identifier<All> ID_S2C = CommonNetwork.Identifier.create(Legacy4J.createModLocation("player_info_sync_all_s2c"), b -> new All(b, All.ID_S2C));
 
-        public All(Map<String, Object> gameRules, CommonNetwork.Identifier<All> identifier) {
+        public All(Map<Identifier, Integer> gameRules, CommonNetwork.Identifier<All> identifier) {
             this(Collections.emptyMap(), gameRules, GameType.SURVIVAL, identifier);
         }
 
         public All(CommonNetwork.PlayBuf buf, CommonNetwork.Identifier<All> identifier) {
-            this(buf.get().readMap(HashMap::new, b -> b.readUUID(), b -> LegacyPlayerInfo.decode(buf)), buf.get().readMap(HashMap::new, FriendlyByteBuf::readUtf, b -> {
-                int type = b.readVarInt();
-                if (type == 0) return b.readBoolean();
-                else return b.readVarInt();
-            }), buf.get().readEnum(GameType.class), identifier);
+            this(buf.get().readMap(HashMap::new, b -> b.readUUID(), b -> LegacyPlayerInfo.decode(buf)), buf.get().readMap(HashMap::new, FriendlyByteBuf::readIdentifier, FriendlyByteBuf::readVarInt), buf.get().readEnum(GameType.class), identifier);
         }
 
-        public static <T extends GameRules.Value<T>> void syncGamerule(GameRules.Key<T> key, T value, MinecraftServer server) {
-            Object objectValue = value instanceof GameRules.IntegerValue integer ? integer.get() : value instanceof GameRules.BooleanValue bool ? bool.get() : null;
-            if (server != null && objectValue != null) {
-                All payload = new All(Collections.emptyMap(), Map.of(key.getId(), objectValue), server.getDefaultGameType(), All.ID_S2C);
+        public static <T> void syncGamerule(GameRule<T> key, T value, MinecraftServer server) {
+            if (server != null) {
+                All payload = new All(Collections.emptyMap(), Map.of(key.getIdentifier(), key.getCommandResult(value)), server.getDefaultGameType(), All.ID_S2C);
                 server.getPlayerList().getPlayers().forEach(sp -> CommonNetwork.sendToPlayer(sp, payload));
             }
         }
@@ -153,11 +231,7 @@ public record PlayerInfoSync(Sync sync, UUID player) implements CommonNetwork.Pa
         @Override
         public void encode(CommonNetwork.PlayBuf buf) {
             buf.get().writeMap(players, (b, u) -> b.writeUUID(u), (b, info) -> LegacyPlayerInfo.encode(buf, info));
-            buf.get().writeMap(gameRules, FriendlyByteBuf::writeUtf, (b, obj) -> {
-                b.writeVarInt(obj instanceof Boolean ? 0 : 1);
-                if (obj instanceof Boolean bol) b.writeBoolean(bol);
-                else if (obj instanceof Integer i) b.writeVarInt(i);
-            });
+            buf.get().writeMap(gameRules, FriendlyByteBuf::writeIdentifier, FriendlyByteBuf::writeVarInt);
             buf.get().writeEnum(defaultGameType);
         }
 
@@ -172,15 +246,21 @@ public record PlayerInfoSync(Sync sync, UUID player) implements CommonNetwork.Pa
                 return false;
             });
             context.executor().execute(() -> {
-                GameRules displayRules = context.player() instanceof ServerPlayer sp ? FactoryAPIPlatform.getEntityServer(sp).getGameRules() : Legacy4JClient.gameRules;
-                displayRules.visitGameRuleTypes(new GameRules.GameRuleTypeVisitor() {
+                GameRules displayRules = context.player() instanceof ServerPlayer sp ? sp.level().getGameRules() : Legacy4JClient.gameRules;
+                displayRules.visitGameRuleTypes(new GameRuleTypeVisitor() {
                     @Override
-                    public <T extends GameRules.Value<T>> void visit(GameRules.Key<T> key, GameRules.Type<T> type) {
-                        if (gameRules.containsKey(key.getId()) && (context.player().level().isClientSide() || NON_OP_GAMERULES.contains(key) || context.player().hasPermissions(2))) {
-                            if (gameRules.get(key.getId()) instanceof Boolean b && displayRules.getRule(key) instanceof GameRules.BooleanValue v)
-                                v.set(b, null);
-                            if (gameRules.get(key.getId()) instanceof Integer i && displayRules.getRule(key) instanceof GameRules.IntegerValue v)
-                                v.set(i, null);
+                    public void visitBoolean(GameRule<Boolean> gameRule) {
+                        Identifier id = gameRule.getIdentifier();
+                        if (gameRules.containsKey(id) && (context.player().level().isClientSide() || NON_OP_GAMERULES.contains(gameRule.getIdentifier()) || context.player().permissions().hasPermission(Permissions.COMMANDS_GAMEMASTER))) {
+                            displayRules.set(gameRule, gameRules.get(id) == 1, null);
+                        }
+                    }
+
+                    @Override
+                    public void visitInteger(GameRule<Integer> gameRule) {
+                        Identifier id = gameRule.getIdentifier();
+                        if (gameRules.containsKey(id) && (context.player().level().isClientSide() || NON_OP_GAMERULES.contains(gameRule.getIdentifier()) || context.player().permissions().hasPermission(Permissions.COMMANDS_GAMEMASTER))) {
+                            displayRules.set(gameRule, gameRules.get(id), null);
                         }
                     }
                 });
@@ -188,3 +268,5 @@ public record PlayerInfoSync(Sync sync, UUID player) implements CommonNetwork.Pa
         }
     }
 }
+
+

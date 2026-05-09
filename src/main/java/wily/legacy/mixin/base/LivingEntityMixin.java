@@ -11,8 +11,8 @@ import net.minecraft.world.entity.Entity;
 import net.minecraft.world.entity.EntityType;
 import net.minecraft.world.entity.LivingEntity;
 import net.minecraft.world.entity.OwnableEntity;
-import net.minecraft.world.entity.animal.IronGolem;
-import net.minecraft.world.entity.animal.SnowGolem;
+import net.minecraft.world.entity.animal.golem.IronGolem;
+import net.minecraft.world.entity.animal.golem.SnowGolem;
 import net.minecraft.world.entity.player.Player;
 import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.level.Level;
@@ -25,6 +25,7 @@ import wily.factoryapi.FactoryAPIClient;
 import wily.factoryapi.base.config.FactoryConfig;
 import wily.legacy.Legacy4JClient;
 import wily.legacy.config.LegacyCommonOptions;
+import wily.legacy.entity.LegacyPlayerInfo;
 import wily.legacy.init.LegacyGameRules;
 
 import static wily.legacy.Legacy4JClient.gameRules;
@@ -44,7 +45,7 @@ public abstract class LivingEntityMixin extends Entity {
     }
 
     private boolean isLegacyFlying() {
-        return ((LivingEntity) (Object) this instanceof Player p && p.getAbilities().flying && (!level().isClientSide() || Legacy4JClient.hasModOnServer())) && LegacyGameRules.getSidedBooleanGamerule(this, LegacyGameRules.LEGACY_FLIGHT);
+        return ((LivingEntity) (Object) this instanceof Player p && p.getAbilities().flying && LegacyGameRules.getSidedBooleanGamerule(this, LegacyGameRules.LEGACY_FLIGHT.get()));
     }
 
     @Redirect(method = "travelInAir", at = @At(value = "INVOKE", target = "Lnet/minecraft/world/entity/LivingEntity;setDeltaMovement(DDD)V", ordinal = 1))
@@ -54,7 +55,11 @@ public abstract class LivingEntityMixin extends Entity {
 
     @Inject(method = "hurtServer", at = @At("HEAD"), cancellable = true)
     public void hurt(ServerLevel level, DamageSource damageSource, float f, CallbackInfoReturnable<Boolean> cir) {
-        if (!level().isClientSide() && !level().getServer().isPvpAllowed() && damageSource.getDirectEntity() instanceof Player && (this instanceof OwnableEntity o && damageSource.getDirectEntity().equals(o.getOwner()) || ((Object) this) instanceof IronGolem i && i.isPlayerCreated() || ((Object) this) instanceof SnowGolem)) {
+        if ((Object) this instanceof Player player && player instanceof LegacyPlayerInfo info && !info.isVisible()) {
+            cir.setReturnValue(false);
+            return;
+        }
+        if (!level().isClientSide() && !level().getServer().overworld().isPvpAllowed() && damageSource.getDirectEntity() instanceof Player && (this instanceof OwnableEntity o && damageSource.getDirectEntity().equals(o.getOwner()) || ((Object) this) instanceof IronGolem i && i.isPlayerCreated() || ((Object) this) instanceof SnowGolem)) {
             cir.setReturnValue(false);
         }
     }
@@ -72,6 +77,6 @@ public abstract class LivingEntityMixin extends Entity {
 
     @ModifyArg(method = "jumpInLiquid", at = @At(value = "INVOKE", target = "Lnet/minecraft/world/phys/Vec3;add(DDD)Lnet/minecraft/world/phys/Vec3;"), index = 1)
     protected double jumpInLiquid(double y, @Local(argsOnly = true) TagKey<Fluid> tagKey) {
-        return tagKey.equals(FluidTags.WATER) && LegacyGameRules.getSidedBooleanGamerule(this, LegacyGameRules.LEGACY_SWIMMING) ? y * 2 : y;
+        return tagKey.equals(FluidTags.WATER) && LegacyGameRules.getSidedBooleanGamerule(this, LegacyGameRules.LEGACY_SWIMMING.get()) ? y * 2 : y;
     }
 }

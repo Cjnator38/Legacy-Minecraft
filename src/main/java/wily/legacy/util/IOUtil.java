@@ -9,7 +9,7 @@ import net.minecraft.core.Registry;
 import net.minecraft.core.component.DataComponentPatch;
 //?}
 import net.minecraft.core.registries.BuiltInRegistries;
-import net.minecraft.resources.ResourceLocation;
+import net.minecraft.resources.Identifier;
 import net.minecraft.server.packs.resources.ResourceManager;
 import net.minecraft.tags.TagKey;
 import net.minecraft.util.GsonHelper;
@@ -30,7 +30,7 @@ public class IOUtil {
 
     //TODO: Replace this with a Codec, like RecipeInfo.Filter
     public static <T> Predicate<T> registryMatches(Registry<T> registry, JsonObject o) {
-        String name = registry.key().location().getPath();
+        String name = registry.key().identifier().getPath();
         if (!o.has(name) && !o.has(name + "s")) return t -> false;
         List<T> tip = new ArrayList<>();
         List<T> tipExclusions = new ArrayList<>();
@@ -49,7 +49,7 @@ public class IOUtil {
                     if (s.startsWith("#"))
                         tipTags.add(TagKey.create(registry.key(), FactoryAPI.createLocation(s.replaceFirst("#", ""))));
                     else if (s.startsWith("!")) {
-                        ResourceLocation l = FactoryAPI.createLocation(s.replaceFirst("!", ""));
+                        Identifier l = FactoryAPI.createLocation(s.replaceFirst("!", ""));
                         registry.getOptional(l).ifPresent(tipExclusions::add);
                     } else tip.add(FactoryAPIPlatform.getRegistryValue(FactoryAPI.createLocation(s), registry));
                 }
@@ -76,6 +76,13 @@ public class IOUtil {
     public static <T> void ifJsonStringNotNull(JsonObject object, String element, Function<String, T> constructor, Consumer<T> consumer) {
         T obj = getJsonStringOrNull(object, element, constructor);
         if (obj != null) consumer.accept(obj);
+    }
+
+    public static final Codec<ArbitrarySupplier<ItemStack>> LAZY_ITEM_SUPPLIER_CODEC = Codec.of(DynamicUtil.ITEM_SUPPLIER_CODEC, IOUtil::decodeLazyItemSupplier);
+
+    public static <T> DataResult<Pair<ArbitrarySupplier<ItemStack>, T>> decodeLazyItemSupplier(DynamicOps<T> ops, T input) {
+        JsonElement json = ops.convertTo(JsonOps.INSTANCE, input);
+        return DataResult.success(Pair.of(() -> DynamicUtil.ITEM_CODEC.parse(DynamicUtil.getActualRegistryOps(JsonOps.INSTANCE), json).result().orElse(ItemStack.EMPTY), input));
     }
 
     public static Stream<String> getOrderedNamespaces(ResourceManager manager) {
@@ -142,13 +149,23 @@ public class IOUtil {
 
         @Override
         public <T1> DataResult<Pair<T, T1>> decode(DynamicOps<T1> dynamicOps, T1 t1) {
-            DataResult<Pair<T, T1>> decoded = decoder.decode(dynamicOps, t1);
+            DataResult<Pair<T, T1>> decoded;
+            try {
+                decoded = decoder.decode(dynamicOps, t1);
+            } catch (RuntimeException e) {
+                return fallback.decode(dynamicOps, t1);
+            }
             return decoded.isError() ? fallback.decode(dynamicOps, t1) : decoded;
         }
 
         @Override
         public <T1> DataResult<T1> encode(T t, DynamicOps<T1> dynamicOps, T1 t1) {
-            DataResult<T1> encoded = encoder.encode(t, dynamicOps, t1);
+            DataResult<T1> encoded;
+            try {
+                encoded = encoder.encode(t, dynamicOps, t1);
+            } catch (RuntimeException e) {
+                return fallback.encode(t, dynamicOps, t1);
+            }
             return encoded.isError() ? fallback.encode(t, dynamicOps, t1) : encoded;
         }
     }

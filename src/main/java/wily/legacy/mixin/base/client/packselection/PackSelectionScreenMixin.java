@@ -2,11 +2,14 @@ package wily.legacy.mixin.base.client.packselection;
 
 import com.mojang.blaze3d.platform.InputConstants;
 import net.minecraft.ChatFormatting;
-import net.minecraft.Util;
+import net.minecraft.client.Minecraft;
+import net.minecraft.util.Util;
 import net.minecraft.client.gui.Font;
-import net.minecraft.client.gui.GuiGraphics;
+import net.minecraft.client.gui.GuiGraphicsExtractor;
 import net.minecraft.client.gui.components.AbstractButton;
 import net.minecraft.client.gui.components.Button;
+import net.minecraft.client.gui.components.Renderable;
+import net.minecraft.client.gui.components.events.GuiEventListener;
 import net.minecraft.client.gui.narration.NarrationElementOutput;
 import net.minecraft.client.gui.screens.Screen;
 import net.minecraft.client.gui.screens.packs.PackSelectionModel;
@@ -28,6 +31,11 @@ import wily.factoryapi.base.client.UIAccessor;
 import wily.factoryapi.util.FactoryScreenUtil;
 import wily.legacy.client.CommonColor;
 import wily.legacy.client.ControlType;
+import wily.legacy.client.DownloadedPackMetadata;
+import wily.legacy.client.DownloadedResourceAlbums;
+import wily.legacy.client.LegacyOptions;
+import wily.legacy.skins.skin.CustomSkinPackStore;
+import wily.legacy.skins.skin.DownloadedSkinPackStore;
 import wily.legacy.util.LegacyComponents;
 import wily.legacy.util.LegacySprites;
 import wily.legacy.client.controller.ControllerBinding;
@@ -37,7 +45,9 @@ import wily.legacy.util.client.LegacySoundUtil;
 
 import java.nio.file.Path;
 import java.util.ArrayList;
+import java.util.IdentityHashMap;
 import java.util.List;
+import java.util.Map;
 import java.util.stream.Stream;
 
 import static wily.legacy.util.LegacySprites.UNSELECT_HIGHLIGHTED;
@@ -65,6 +75,10 @@ public abstract class PackSelectionScreenMixin extends Screen implements Control
     private final RenderableVList unselectedPacksList = new RenderableVList(this).layoutSpacing(l -> 0);
     @Unique
     private final List<RenderableVList> renderableVLists = List.of(unselectedPacksList, selectedPacksList);
+    @Unique
+    private final Map<AbstractButton, String> packIds = new IdentityHashMap<>();
+    @Unique
+    private String lastFocusedPackId;
 
     protected PackSelectionScreenMixin(Component component) {
         super(component);
@@ -80,11 +94,13 @@ public abstract class PackSelectionScreenMixin extends Screen implements Control
     @Inject(method = "init", at = @At("HEAD"), cancellable = true)
     public void init(CallbackInfo ci) {
         ci.cancel();
+        rememberFocusedPack();
         super.init();
         panel.init();
         unselectedPacksList.init(panel.x + 15, panel.y + 30, 180, 192);
         selectedPacksList.init(panel.x + 215, panel.y + 30, 180, 192);
         this.doneButton = Button.builder(CommonComponents.GUI_DONE, (button) -> this.onClose()).build();
+        restoreFocusedPack();
     }
 
     @Inject(method = "repositionElements", at = @At("HEAD"), cancellable = true)
@@ -100,7 +116,7 @@ public abstract class PackSelectionScreenMixin extends Screen implements Control
     }
 
     @Override
-    public void renderBackground(GuiGraphics guiGraphics, int i, int j, float f) {
+    public void extractBackground(GuiGraphicsExtractor GuiGraphicsExtractor, int i, int j, float f) {
     }
 
     @Inject(method = "<init>", at = @At("RETURN"))
@@ -111,9 +127,12 @@ public abstract class PackSelectionScreenMixin extends Screen implements Control
     @Inject(method = "populateLists", at = @At("HEAD"), cancellable = true)
     private void populateLists(CallbackInfo ci) {
         ci.cancel();
+        rememberFocusedPack();
+        packIds.clear();
         addPacks(unselectedPacksList, model.getUnselected());
         addPacks(selectedPacksList, model.getSelected());
         repositionElements();
+        restoreFocusedPack();
     }
 
     @Inject(method = "onClose", at = @At("RETURN"))
@@ -124,57 +143,63 @@ public abstract class PackSelectionScreenMixin extends Screen implements Control
     private void addPacks(RenderableVList list, Stream<PackSelectionModel.Entry> stream) {
         list.renderables.clear();
         stream.forEach(e -> {
+            if (DownloadedResourceAlbums.isManagedPack(e.getId())) return;
+            if (DownloadedSkinPackStore.isManagedResourcePackId(e.getId())) return;
+            if (CustomSkinPackStore.isManagedResourcePackId(e.getId())) return;
+            Component title = DownloadedPackMetadata.getTitle(e.getId(), e.getTitle());
+            Component descriptionText = DownloadedPackMetadata.getDescription(e.getId(), e.getExtendedDescription());
             List<Component> description = new ArrayList<>();
             if (!e.getCompatibility().isCompatible()) {
                 description.add(INCOMPATIBLE_TITLE);
                 description.add(e.getCompatibility().getDescription());
             }
-            if (!e.getExtendedDescription().getString().isEmpty()) description.add(e.getExtendedDescription());
-            AbstractButton button = new AbstractButton(0, 0, 180, 30, e.getTitle()) {
+            if (!descriptionText.getString().isEmpty()) description.add(descriptionText);
+            AbstractButton button = new AbstractButton(0, 0, 180, 30, title) {
                 @Override
-                protected void renderWidget(GuiGraphics guiGraphics, int mouseX, int mouseY, float partialTicks) {
-                    super.renderWidget(guiGraphics, mouseX, mouseY, partialTicks);
+                protected void extractContents(GuiGraphicsExtractor GuiGraphicsExtractor, int mouseX, int mouseY, float partialTicks) {
+                    extractDefaultSprite(GuiGraphicsExtractor);
+                    renderScrollingString(GuiGraphicsExtractor, Minecraft.getInstance().font, 2, e.getCompatibility().isCompatible() ? LegacyRenderUtil.getDefaultTextColor(!isHoveredOrFocused()) : 0xFF0000FF);
                     FactoryScreenUtil.enableBlend();
-                    FactoryGuiGraphics.of(guiGraphics).blit(e.getIconTexture(), getX() + 5, getY() + 5, 0.0f, 0.0f, 20, 20, 20, 20);
+                    FactoryGuiGraphics.of(GuiGraphicsExtractor).blit(e.getIconTexture(), getX() + 5, getY() + 5, 0.0f, 0.0f, 20, 20, 20, 20);
                     FactoryScreenUtil.disableBlend();
                     if ((minecraft.options.touchscreen().get().booleanValue() || isHovered) && showHoverOverlay()) {
-                        guiGraphics.fill(getX() + 5, getY() + 5, getX() + 25, getY() + 25, -1601138544);
+                        GuiGraphicsExtractor.fill(getX() + 5, getY() + 5, getX() + 25, getY() + 25, -1601138544);
                         int p = mouseX - getX();
                         int q = mouseY - getY();
                         if (e.canSelect()) {
                             if (p < 32) {
-                                FactoryGuiGraphics.of(guiGraphics).blitSprite(LegacySprites.JOIN_HIGHLIGHTED, getX() + 5, getY() + 5, 20, 20);
+                                FactoryGuiGraphics.of(GuiGraphicsExtractor).blitSprite(LegacySprites.JOIN_HIGHLIGHTED, getX() + 5, getY() + 5, 20, 20);
                             } else {
-                                FactoryGuiGraphics.of(guiGraphics).blitSprite(LegacySprites.JOIN, getX() + 5, getY() + 5, 20, 20);
+                                FactoryGuiGraphics.of(GuiGraphicsExtractor).blitSprite(LegacySprites.JOIN, getX() + 5, getY() + 5, 20, 20);
                             }
                         } else {
                             if (e.canUnselect()) {
                                 if (p < 16) {
-                                    FactoryGuiGraphics.of(guiGraphics).blitSprite(UNSELECT_HIGHLIGHTED, getX() + 5, getY() + 5, 20, 20);
+                                    FactoryGuiGraphics.of(GuiGraphicsExtractor).blitSprite(UNSELECT_HIGHLIGHTED, getX() + 5, getY() + 5, 20, 20);
                                 } else {
-                                    FactoryGuiGraphics.of(guiGraphics).blitSprite(UNSELECT, getX() + 5, getY() + 5, 20, 20);
+                                    FactoryGuiGraphics.of(GuiGraphicsExtractor).blitSprite(UNSELECT, getX() + 5, getY() + 5, 20, 20);
                                 }
                             }
                             if (e.canMoveUp()) {
                                 if (p < 32 && p > 16 && q < 16) {
-                                    FactoryGuiGraphics.of(guiGraphics).blitSprite(LegacySprites.TRANSFER_MOVE_UP_HIGHLIGHTED, getX(), getY(), 32, 32);
+                                    FactoryGuiGraphics.of(GuiGraphicsExtractor).blitSprite(LegacySprites.TRANSFER_MOVE_UP_HIGHLIGHTED, getX(), getY(), 32, 32);
                                 } else {
-                                    FactoryGuiGraphics.of(guiGraphics).blitSprite(LegacySprites.TRANSFER_MOVE_UP, getX(), getY(), 32, 32);
+                                    FactoryGuiGraphics.of(GuiGraphicsExtractor).blitSprite(LegacySprites.TRANSFER_MOVE_UP, getX(), getY(), 32, 32);
                                 }
                             }
                             if (e.canMoveDown()) {
                                 if (p < 32 && p > 16 && q > 16) {
-                                    FactoryGuiGraphics.of(guiGraphics).blitSprite(LegacySprites.TRANSFER_MOVE_DOWN_HIGHLIGHTED, getX(), getY(), 32, 32);
+                                    FactoryGuiGraphics.of(GuiGraphicsExtractor).blitSprite(LegacySprites.TRANSFER_MOVE_DOWN_HIGHLIGHTED, getX(), getY(), 32, 32);
                                 } else {
-                                    FactoryGuiGraphics.of(guiGraphics).blitSprite(LegacySprites.TRANSFER_MOVE_DOWN, getX(), getY(), 32, 32);
+                                    FactoryGuiGraphics.of(GuiGraphicsExtractor).blitSprite(LegacySprites.TRANSFER_MOVE_DOWN, getX(), getY(), 32, 32);
                                 }
                             }
                         }
                     }
                 }
 
-                protected void renderScrollingString(GuiGraphics guiGraphics, Font font, int i, int j) {
-                    LegacyRenderUtil.renderScrollingString(guiGraphics, font, getMessage(), getX() + 30, getY(), getX() + width - 2, getY() + height, e.getCompatibility().isCompatible() ? LegacyRenderUtil.getDefaultTextColor(!isHoveredOrFocused()) : 0xFF0000FF, true);
+                protected void renderScrollingString(GuiGraphicsExtractor GuiGraphicsExtractor, Font font, int i, int j) {
+                    LegacyRenderUtil.renderScrollingString(GuiGraphicsExtractor, font, getMessage(), getX() + 30, getY(), getX() + width - 2, getY() + height, e.getCompatibility().isCompatible() ? LegacyRenderUtil.getDefaultTextColor(!isHoveredOrFocused()) : 0xFF0000FF, true);
                 }
 
                 @Override
@@ -249,9 +274,71 @@ public abstract class PackSelectionScreenMixin extends Screen implements Control
                     defaultButtonNarrationText(narrationElementOutput);
                 }
             };
-            if (!description.isEmpty()) button.setTooltip(new MultilineTooltip(description, 161));
+            packIds.put(button, e.getId());
+            if (!description.isEmpty()) button.setTooltip(MultilineTooltip.create(description, 161));
             list.addRenderable(button);
         });
+    }
+
+    @Unique
+    private void rememberFocusedPack() {
+        if (getFocused() instanceof AbstractButton button) {
+            String packId = packIds.get(button);
+            if (packId != null) lastFocusedPackId = packId;
+        }
+    }
+
+    @Unique
+    private void restoreFocusedPack() {
+        if (lastFocusedPackId == null) return;
+        for (RenderableVList list : renderableVLists) {
+            for (var renderable : list.renderables) {
+                if (renderable instanceof AbstractButton button && lastFocusedPackId.equals(packIds.get(button))) {
+                    list.focusRenderable(button);
+                    return;
+                }
+            }
+        }
+    }
+
+    @Unique
+    private boolean legacy$wrapPackFocus(KeyEvent keyEvent) {
+        boolean up = keyEvent.key() == InputConstants.KEY_UP;
+        boolean down = keyEvent.key() == InputConstants.KEY_DOWN;
+        if (!up && !down) return false;
+        if (!(getFocused() instanceof GuiEventListener focused)) return false;
+        for (RenderableVList list : renderableVLists) {
+            int index = list.renderables.indexOf(focused);
+            if (index < 0) continue;
+            int first = legacy$getPackEdge(list, false);
+            int last = legacy$getPackEdge(list, true);
+            if (up && index == first) return legacy$focusPack(list, last);
+            if (down && index == last) return legacy$focusPack(list, first);
+            return false;
+        }
+        return false;
+    }
+
+    @Unique
+    private int legacy$getPackEdge(RenderableVList list, boolean last) {
+        int start = last ? list.renderables.size() - 1 : 0;
+        int step = last ? -1 : 1;
+        for (int i = start; i >= 0 && i < list.renderables.size(); i += step) {
+            if (list.renderables.get(i) instanceof GuiEventListener) return i;
+        }
+        return -1;
+    }
+
+    @Unique
+    private boolean legacy$focusPack(RenderableVList list, int index) {
+        if (index < 0 || index >= list.renderables.size()) return false;
+        Renderable renderable = list.renderables.get(index);
+        if (!(renderable instanceof GuiEventListener listener)) return false;
+        if (renderable instanceof AbstractButton button) lastFocusedPackId = packIds.get(button);
+        setFocused(listener);
+        list.focusRenderable(renderable);
+        setFocused(listener);
+        return true;
     }
 
 
@@ -274,6 +361,7 @@ public abstract class PackSelectionScreenMixin extends Screen implements Control
 
     @Override
     public boolean keyPressed(KeyEvent keyEvent) {
+        if (legacy$wrapPackFocus(keyEvent)) return true;
         for (RenderableVList renderableVList : getRenderableVLists()) {
             if (renderableVList.keyPressed(keyEvent.key())) return true;
         }
@@ -293,19 +381,19 @@ public abstract class PackSelectionScreenMixin extends Screen implements Control
      *///?} else {
     @Override
             //?}
-    public void render(GuiGraphics guiGraphics, int i, int j, float f/*? if <=1.20.1 {*//*, CallbackInfo ci*//*?}*/) {
+    public void extractRenderState(GuiGraphicsExtractor GuiGraphicsExtractor, int i, int j, float f/*? if <=1.20.1 {*//*, CallbackInfo ci*//*?}*/) {
         //? if <=1.20.1
         /*ci.cancel();*/
-        LegacyRenderUtil.renderDefaultBackground(UIAccessor.of(this), guiGraphics, false);
-        panel.render(guiGraphics, i, j, f);
+        LegacyRenderUtil.renderDefaultBackground(UIAccessor.of(this), GuiGraphicsExtractor, false);
+        panel.extractRenderState(GuiGraphicsExtractor, i, j, f);
         FactoryScreenUtil.enableBlend();
-        FactoryGuiGraphics.of(guiGraphics).setBlitColor(1.0f, 1.0f, 1.0f, 0.6f);
-        FactoryGuiGraphics.of(guiGraphics).blitSprite(LegacySprites.PANEL_RECESS, panel.x + 10, panel.y + 10, 190, 220);
-        FactoryGuiGraphics.of(guiGraphics).clearBlitColor();
+        FactoryGuiGraphics.of(GuiGraphicsExtractor).setBlitColor(1.0f, 1.0f, 1.0f, 0.6f);
+        FactoryGuiGraphics.of(GuiGraphicsExtractor).blitSprite(LegacySprites.PANEL_RECESS, panel.x + 10, panel.y + 10, 190, 220);
+        FactoryGuiGraphics.of(GuiGraphicsExtractor).clearBlitColor();
         FactoryScreenUtil.disableBlend();
-        FactoryGuiGraphics.of(guiGraphics).blitSprite(LegacySprites.PANEL_RECESS, panel.x + 210, panel.y + 10, 190, 220);
-        guiGraphics.drawString(this.font, SELECTED_PACK, panel.x + 10 + (190 - font.width(SELECTED_PACK)) / 2, panel.y + 18, CommonColor.INVENTORY_GRAY_TEXT.get(), false);
-        guiGraphics.drawString(this.font, AVAILABLE_PACK, panel.x + 210 + (190 - font.width(AVAILABLE_PACK)) / 2, panel.y + 18, CommonColor.INVENTORY_GRAY_TEXT.get(), false);
-        super.render(guiGraphics, i, j, f);
+        FactoryGuiGraphics.of(GuiGraphicsExtractor).blitSprite(LegacySprites.PANEL_RECESS, panel.x + 210, panel.y + 10, 190, 220);
+        GuiGraphicsExtractor.text(this.font, SELECTED_PACK, panel.x + 10 + (190 - font.width(SELECTED_PACK)) / 2, panel.y + 18, CommonColor.GRAY_TEXT.get(), false);
+        GuiGraphicsExtractor.text(this.font, AVAILABLE_PACK, panel.x + 210 + (190 - font.width(AVAILABLE_PACK)) / 2, panel.y + 18, CommonColor.GRAY_TEXT.get(), false);
+        super.extractRenderState(GuiGraphicsExtractor, i, j, f);
     }
 }

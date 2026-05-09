@@ -1,9 +1,9 @@
 package wily.legacy.client.screen;
 
-import net.minecraft.Util;
+import net.minecraft.util.Util;
 import net.minecraft.client.GameNarrator;
 import net.minecraft.client.Minecraft;
-import net.minecraft.client.gui.GuiGraphics;
+import net.minecraft.client.gui.GuiGraphicsExtractor;
 import net.minecraft.client.gui.screens.Screen;
 import net.minecraft.network.chat.Component;
 import net.minecraft.resources.ResourceKey;
@@ -81,13 +81,37 @@ public class LegacyLoadingScreen extends Screen implements LegacyLoading, Contro
         Minecraft.getInstance().setScreen(getFakeAutoSaveScreen());
     }
 
+    public static void openFakeManualSaveScreen(Screen nextScreen) {
+        if (!LegacyOptions.fakeManualSaveScreen.get()) {
+            Minecraft.getInstance().setScreen(nextScreen);
+            return;
+        }
+        Minecraft.getInstance().gui.autosaveIndicatorValue = 0.0f;
+        Minecraft.getInstance().setScreen(getFakeManualSaveScreen(nextScreen));
+    }
+
     public static LegacyLoadingScreen getFakeAutoSaveScreen() {
-        return new LegacyLoadingScreen(LegacyComponents.PREPARING_AUTOSAVE, LegacyComponents.PREPARING_CHUNKS) {
+        return createFakeSaveScreen(LegacyComponents.PREPARING_AUTOSAVE, true, () -> Minecraft.getInstance().setScreen(null));
+    }
+
+    public static LegacyLoadingScreen getFakeManualSaveScreen(Screen nextScreen) {
+        return createFakeSaveScreen(LegacyComponents.PREPARING_MANUAL_SAVE, true, () -> Minecraft.getInstance().setScreen(nextScreen));
+    }
+
+    private static LegacyLoadingScreen createFakeSaveScreen(Component loadingHeader, boolean controlsAutosaveIndicator, Runnable onClose) {
+        return new LegacyLoadingScreen(loadingHeader, LegacyComponents.PREPARING_CHUNKS) {
             int finalizingTicks = -1;
 
             @Override
+            public void onClose() {
+                onClose.run();
+            }
+
+            @Override
             public void tick() {
-                minecraft.gui.autosaveIndicatorValue = 0.0f;
+                if (controlsAutosaveIndicator) {
+                    minecraft.gui.autosaveIndicatorValue = 0.0f;
+                }
                 super.tick();
 
                 if (finalizingTicks < 0) {
@@ -103,7 +127,9 @@ public class LegacyLoadingScreen extends Screen implements LegacyLoading, Contro
                 } else {
                     onClose();
                     LegacySoundUtil.playBackSound();
-                    minecraft.gui.autosaveIndicatorValue = 1.0f;
+                    if (controlsAutosaveIndicator) {
+                        minecraft.gui.autosaveIndicatorValue = 1.0f;
+                    }
                 }
             }
         };
@@ -145,16 +171,16 @@ public class LegacyLoadingScreen extends Screen implements LegacyLoading, Contro
 
     //? if >1.20.1 {
     @Override
-    public void renderBackground(GuiGraphics guiGraphics, int i, int j, float f) {
+    public void extractBackground(GuiGraphicsExtractor GuiGraphicsExtractor, int i, int j, float f) {
         renderer.prepareRender(minecraft, UIAccessor.of(this));
-        renderer.renderBackground(guiGraphics, i, j, f);
+        renderer.extractBackground(GuiGraphicsExtractor, i, j, f);
     }
     //?}
 
     @Override
-    public void render(GuiGraphics guiGraphics, int i, int j, float f) {
-        super.render(guiGraphics, i, j, f);
-        renderer.renderForeground(guiGraphics, i, j, f);
+    public void extractRenderState(GuiGraphicsExtractor GuiGraphicsExtractor, int i, int j, float f) {
+        super.extractRenderState(GuiGraphicsExtractor, i, j, f);
+        renderer.renderForeground(GuiGraphicsExtractor, i, j, f);
     }
 
     @Override

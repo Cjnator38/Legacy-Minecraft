@@ -1,11 +1,12 @@
 package wily.legacy.mixin.base.client;
 
 import com.llamalad7.mixinextras.injector.ModifyExpressionValue;
+import com.llamalad7.mixinextras.injector.ModifyReturnValue;
 import com.llamalad7.mixinextras.injector.v2.WrapWithCondition;
 import com.llamalad7.mixinextras.sugar.Local;
 import com.mojang.blaze3d.platform.InputConstants;
 import com.mojang.blaze3d.platform.Window;
-import net.minecraft.Util;
+import net.minecraft.util.Util;
 import net.minecraft.client.KeyMapping;
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.Options;
@@ -22,12 +23,17 @@ import net.minecraft.client.multiplayer.MultiPlayerGameMode;
 import net.minecraft.client.player.LocalPlayer;
 import net.minecraft.client.sounds.MusicManager;
 import net.minecraft.client.sounds.SoundManager;
+import net.minecraft.core.component.DataComponents;
 import net.minecraft.network.protocol.game.ServerboundPlayerCommandPacket;
 import net.minecraft.server.packs.resources.ReloadInstance;
 import net.minecraft.sounds.SoundEvents;
 import net.minecraft.sounds.SoundSource;
 import net.minecraft.util.Mth;
 import net.minecraft.world.InteractionHand;
+import net.minecraft.world.item.ShieldItem;
+import net.minecraft.world.item.BlockItem;
+import net.minecraft.world.item.context.BlockPlaceContext;
+import net.minecraft.world.level.block.Blocks;
 import net.minecraft.world.level.block.BedBlock;
 import net.minecraft.world.phys.BlockHitResult;
 import net.minecraft.world.phys.HitResult;
@@ -47,7 +53,11 @@ import wily.legacy.Legacy4JClient;
 import wily.legacy.client.*;
 import wily.legacy.client.SoundManagerAccessor;
 import wily.legacy.client.screen.*;
+import wily.legacy.entity.LegacyShieldPlayer;
+import wily.legacy.init.LegacyGameRules;
 import wily.legacy.network.ServerPlayerMissHitPayload;
+import wily.legacy.network.ServerPlayerShieldPausePayload;
+import wily.legacy.util.LegacyItemUtil;
 import wily.legacy.util.client.LegacyGuiElements;
 import wily.legacy.util.client.LegacyRenderUtil;
 import wily.legacy.util.client.LegacySoundUtil;
@@ -90,6 +100,7 @@ public abstract class MinecraftMixin {
     Screen oldScreen;
     private boolean inventoryKeyLastPressed = false;
     private int inventoryKeyHold = 0;
+    private int legacy$shieldPauseSyncCooldown = 0;
     @Shadow
     private int rightClickDelay;
     @Shadow
@@ -109,6 +120,19 @@ public abstract class MinecraftMixin {
     @Shadow
     public abstract boolean isPaused();
 
+    @Unique
+    private void legacy$pauseShield() {
+        if (player != null && LegacyGameRules.getSidedBooleanGamerule(player, LegacyGameRules.LEGACY_SHIELD_CONTROLS)) {
+            boolean usingShield = player.isUsingItem() && player.getUseItem().getItem() instanceof ShieldItem;
+            if (usingShield && Legacy4JClient.hasModOnServer() && legacy$shieldPauseSyncCooldown == 0) {
+                CommonNetwork.sendToServer(new ServerPlayerShieldPausePayload());
+                legacy$shieldPauseSyncCooldown = 1;
+            }
+            ((LegacyShieldPlayer) player).pauseShield(LegacyShieldPlayer.SHIELD_PAUSE_TICKS);
+            if (usingShield && gameMode != null) gameMode.releaseUsingItem(player);
+        }
+    }
+
     private Minecraft self() {
         return (Minecraft) (Object) this;
     }
@@ -123,7 +147,7 @@ public abstract class MinecraftMixin {
     private Supplier<Overlay> init(Supplier<Minecraft> mc, Supplier<ReloadInstance> ri, Consumer<Optional<Throwable>> ex, boolean fade) {
         return ()-> new LoadingOverlay(mc.get(),ri.get(),ex,fade);
     }
-    *///?} elif neoforge {
+    *///?} elif neoforge && <26.1 {
     /*@Redirect(method = "<init>", at = @At(value = "INVOKE", target = "Lnet/neoforged/neoforge/client/ClientHooks;createLoadingOverlay(Lnet/minecraft/client/Minecraft;Lnet/minecraft/server/packs/resources/ReloadInstance;Ljava/util/function/Consumer;Z)Lnet/minecraft/client/gui/screens/Overlay;", remap = false))
     private Overlay init(Minecraft minecraft, ReloadInstance reloadInstance, Consumer consumer, boolean b) {
         return new LoadingOverlay(minecraft, reloadInstance, consumer, b);
@@ -132,16 +156,37 @@ public abstract class MinecraftMixin {
 
     @Inject(method = "handleKeybinds", at = @At("HEAD"))
     private void handleKeybinds(CallbackInfo ci) {
+        if (legacy$shieldPauseSyncCooldown > 0) legacy$shieldPauseSyncCooldown--;
+        if (player != null && screen == null && player.isUsingItem() && player.getUseItem().getItem() instanceof ShieldItem && LegacyGameRules.getSidedBooleanGamerule(player, LegacyGameRules.LEGACY_SHIELD_CONTROLS) && (options.keyAttack.isDown() || options.keyUse.isDown())) {
+            legacy$pauseShield();
+        }
         if (!options.keyUse.isDown()) lastPlayerBlockUsePos = null;
+        if (player != null && LegacyGameRules.getSidedBooleanGamerule(player, LegacyGameRules.LEGACY_OFFHAND_LIMITS) && !LegacyItemUtil.canGoInLceOffhand(player.getMainHandItem())) {
+            while (options.keySwapOffhand.consumeClick()) {
+            }
+        }
+    }
+
+    @Inject(method = "continueAttack", at = @At("HEAD"))
+    private void continueAttack(boolean bl, CallbackInfo ci) {
+        if (bl) legacy$pauseShield();
+    }
+
+    @Inject(method = "startAttack", at = @At("HEAD"), cancellable = true)
+    private void startAttackHead(CallbackInfoReturnable<Boolean> cir) {
+        legacy$pauseShield();
+        if (player != null && player.swinging && player.swingingArm == InteractionHand.MAIN_HAND && player.getMainHandItem().has(DataComponents.PIERCING_WEAPON))
+            cir.setReturnValue(false);
     }
 
     @Inject(method = "startAttack", at = @At(value = "INVOKE", target = "Lnet/minecraft/client/player/LocalPlayer;resetAttackStrengthTicker()V"))
     private void startAttack(CallbackInfoReturnable<Boolean> cir) {
-        CommonNetwork.sendToServer(new ServerPlayerMissHitPayload());
+        if (Legacy4JClient.hasModOnServer()) CommonNetwork.sendToServer(new ServerPlayerMissHitPayload());
     }
 
     @Inject(method = "startUseItem", at = @At("HEAD"), cancellable = true)
     private void startUseItem(CallbackInfo ci) {
+        legacy$pauseShield();
         if (player != null && player.isSleeping()) {
             ClientPacketListener clientPacketListener = player.connection;
             clientPacketListener.send(new ServerboundPlayerCommandPacket(player, ServerboundPlayerCommandPacket.Action.STOP_SLEEPING));
@@ -169,9 +214,21 @@ public abstract class MinecraftMixin {
             rightClickDelay = -1;
     }
 
+    @Inject(method = "startUseItem", at = @At(value = "INVOKE", target = "Lnet/minecraft/client/multiplayer/MultiPlayerGameMode;useItemOn(Lnet/minecraft/client/player/LocalPlayer;Lnet/minecraft/world/InteractionHand;Lnet/minecraft/world/phys/BlockHitResult;)Lnet/minecraft/world/InteractionResult;", shift = At.Shift.AFTER))
+    private void rememberConduitRotation(CallbackInfo ci, @Local InteractionHand hand, @Local BlockHitResult hit) {
+        if (!(player.getItemInHand(hand).getItem() instanceof BlockItem blockItem) || blockItem.getBlock() != Blocks.CONDUIT) return;
+        BlockPlaceContext context = new BlockPlaceContext(player, hand, player.getItemInHand(hand), hit);
+        if (level.getBlockState(context.getClickedPos()).is(Blocks.CONDUIT)) ConduitRotationCache.remember(level, context.getClickedPos(), player.getYRot());
+    }
+
     @ModifyExpressionValue(method = "tick", at = @At(value = "INVOKE", target = "Lnet/minecraft/client/player/LocalPlayer;isSleeping()Z"))
     private boolean tick(boolean original) {
         return false;
+    }
+
+    @ModifyReturnValue(method = "isWindowActive", at = @At("RETURN"))
+    private boolean isWindowActive(boolean original) {
+        return original || LegacyOptions.unfocusedInputs.get();
     }
 
     @Inject(method = "runTick", at = @At(value = "INVOKE", target = "Lnet/minecraft/client/sounds/SoundManager;updateSource(Lnet/minecraft/client/Camera;)V"))
@@ -197,27 +254,52 @@ public abstract class MinecraftMixin {
         return LegacyMusicFader.musicManagerShouldTick;
     }
 
-    @Inject(method = /*? if <1.20.3 {*//*"clearLevel(Lnet/minecraft/client/gui/screens/Screen;)V"*//*?} else if <1.21 {*//*"clearClientLevel"*//*?} else {*/"disconnect(Lnet/minecraft/client/gui/screens/Screen;Z)V"/*?}*/, at = @At(value = "INVOKE", target = "Lnet/minecraft/client/gui/Gui;onDisconnected()V"))
-    private void disconnectFadeMusic(CallbackInfo ci) {
+    @Inject(method = /*? if <1.20.3 {*//*"clearLevel(Lnet/minecraft/client/gui/screens/Screen;)V"*//*?} else if <1.21 {*//*"clearClientLevel"*//*?} else {*/"disconnect(Lnet/minecraft/client/gui/screens/Screen;ZZ)V"/*?}*/, at = @At(value = "INVOKE", target = "Lnet/minecraft/client/gui/Gui;onDisconnected()V"))
+    private void disconnectFadeMusic(Screen disconnectScreen, boolean retainDownloadedResourcePacks, boolean updateLevelInEngines, CallbackInfo ci) {
+        ConduitRotationCache.clear();
         SoundManagerAccessor.of(this.soundManager).fadeAllMusic();
     }
 
-    @Redirect(method = "handleKeybinds", at = @At(value = "INVOKE", target = "Lnet/minecraft/client/KeyMapping;consumeClick()Z", ordinal = 4))
+    @Redirect(method = "handleKeybinds", slice = @Slice(from = @At(value = "FIELD", target = "Lnet/minecraft/client/Options;keyInventory:Lnet/minecraft/client/KeyMapping;"), to = @At(value = "FIELD", target = "Lnet/minecraft/client/Options;keyAdvancements:Lnet/minecraft/client/KeyMapping;")), at = @At(value = "INVOKE", target = "Lnet/minecraft/client/KeyMapping;consumeClick()Z"))
     private boolean handleKeybindsInventoryKey(KeyMapping instance) {
-        if (!instance.consumeClick()) {
-            return inventoryKeyLastPressed && !instance.isDown() && !(inventoryKeyLastPressed = false);
-        }
+        boolean clicked = instance.consumeClick();
         AdvancementToast toast = FactoryAPIClient.getToasts().getToast(AdvancementToast.class, Toast.NO_TOKEN);
-        if (toast == null) return true;
-        inventoryKeyHold++;
-        if (!(inventoryKeyLastPressed = inventoryKeyHold < 10)) {
-            FactoryAPIClient.getToasts().clear();
+        if (toast == null) {
+            if (inventoryKeyLastPressed && !instance.isDown()) {
+                inventoryKeyHold = 0;
+                inventoryKeyLastPressed = false;
+                return true;
+            }
             inventoryKeyHold = 0;
-            LegacyAdvancementsScreen screen = new LegacyAdvancementsScreen(null);
-            setScreen(screen);
-            screen.focusRenderable(r -> r instanceof LegacyAdvancementsScreen.AdvancementButton b && b.id.equals(AdvancementToastAccessor.of(toast).getAdvancementId()), i -> screen.getTabList().tabButtons.get(i).onPress(new KeyEvent(InputConstants.KEY_RETURN, 0, 0)));
+            inventoryKeyLastPressed = false;
+            return clicked;
         }
-        return false;
+
+        if (instance.isDown() && (clicked || inventoryKeyLastPressed)) {
+            inventoryKeyLastPressed = true;
+            if (++inventoryKeyHold >= 10) {
+                openToastAdvancement(toast);
+                inventoryKeyLastPressed = false;
+                inventoryKeyHold = 0;
+            }
+            return false;
+        }
+
+        if (inventoryKeyLastPressed) {
+            inventoryKeyHold = 0;
+            inventoryKeyLastPressed = false;
+            return true;
+        }
+
+        return clicked;
+    }
+
+    @Unique
+    private void openToastAdvancement(AdvancementToast toast) {
+        FactoryAPIClient.getToasts().clear();
+        LegacyAdvancementsScreen screen = new LegacyAdvancementsScreen(null);
+        setScreen(screen);
+        screen.focusRenderable(r -> r instanceof LegacyAdvancementsScreen.AdvancementButton b && b.id.equals(AdvancementToastAccessor.of(toast).getAdvancementId()), i -> screen.getTabList().tabButtons.get(i).onPress(new KeyEvent(InputConstants.KEY_RETURN, 0, 0)));
     }
 
     @WrapWithCondition(method = "handleKeybinds", at = @At(value = "INVOKE", target = "Lnet/minecraft/client/Minecraft;setScreen(Lnet/minecraft/client/gui/screens/Screen;)V", ordinal = 1))
@@ -243,23 +325,23 @@ public abstract class MinecraftMixin {
         LegacyTipManager.resetTipOffset(true);
     }
 
-    @WrapWithCondition(method = "setScreen", at = @At(value = "INVOKE", target = "Lnet/minecraft/client/gui/screens/Screen;init(Lnet/minecraft/client/Minecraft;II)V"))
-    private boolean initScreen(Screen instance, Minecraft minecraft, int i, int j) {
+    @WrapWithCondition(method = "setScreen", at = @At(value = "INVOKE", target = "Lnet/minecraft/client/gui/screens/Screen;init(II)V"))
+    private boolean initScreen(Screen instance, int i, int j) {
         if (oldScreen instanceof OverlayPanelScreen s && s.parent == instance) {
-            instance.resize(minecraft, i, j);
+            instance.resize(i, j);
             return false;
         }
         return true;
     }
 
-    @Inject(method = "resizeDisplay", at = @At("RETURN"))
+    @Inject(method = "resizeGui", at = @At("RETURN"))
     private void resizeDisplay(CallbackInfo ci) {
         LegacyTipManager.rebuildActual();
         LegacyTipManager.rebuildActualLoading();
         gui.getChat().rescaleChat();
     }
 
-    @ModifyArg(method = "disconnect", at = @At(value = "INVOKE", target = "Lnet/minecraft/client/Minecraft;setScreen(Lnet/minecraft/client/gui/screens/Screen;)V"))
+    @ModifyArg(method = "disconnect(Lnet/minecraft/client/gui/screens/Screen;ZZ)V", at = @At(value = "INVOKE", target = "Lnet/minecraft/client/Minecraft;setScreenAndShow(Lnet/minecraft/client/gui/screens/Screen;)V"))
     private Screen changeGenericScreen(Screen arg, @Local(argsOnly = true) Screen disconnectScreen) {
         return disconnectScreen instanceof LegacyLoadingScreen ? disconnectScreen : arg;
     }
@@ -282,12 +364,12 @@ public abstract class MinecraftMixin {
         }
     }
 
-    @WrapWithCondition(method = "runTick", at = @At(value = "INVOKE", target = "Lnet/minecraft/client/sounds/SoundManager;pauseAllExcept([Lnet/minecraft/sounds/SoundSource;)V"))
+    @WrapWithCondition(method = "runTick(Z)V", at = @At(value = "INVOKE", target = "Lnet/minecraft/client/sounds/SoundManager;pauseAllExcept([Lnet/minecraft/sounds/SoundSource;)V"))
     public boolean pauseGame(SoundManager instance, SoundSource[] soundSources) {
         return false;
     }
 
-    @WrapWithCondition(method = "updateLevelInEngines", at = @At(value = "INVOKE", target = "Lnet/minecraft/client/sounds/SoundManager;stop()V"))
+    @WrapWithCondition(method = "updateLevelInEngines(Lnet/minecraft/client/multiplayer/ClientLevel;Z)V", at = @At(value = "INVOKE", target = "Lnet/minecraft/client/sounds/SoundManager;stop()V"))
     public boolean updateScreenAndTick(SoundManager instance) {
         SoundManagerAccessor.of(instance).stopAllSound();
         return false;

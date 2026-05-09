@@ -30,11 +30,11 @@ import com.mojang.datafixers.util.Pair;
 import com.sun.net.httpserver.HttpServer;
 import io.netty.channel.ConnectTimeoutException;
 import net.minecraft.ChatFormatting;
-import net.minecraft.Util;
+import net.minecraft.util.Util;
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.User;
-import net.minecraft.client.gui.GuiGraphics;
-import net.minecraft.client.gui.components.PlayerFaceRenderer;
+import net.minecraft.client.gui.GuiGraphicsExtractor;
+import net.minecraft.client.gui.components.PlayerFaceExtractor;
 import net.minecraft.client.resources.language.I18n;
 import net.minecraft.network.chat.Component;
 import net.minecraft.util.GsonHelper;
@@ -274,7 +274,7 @@ public interface MCAccount {
      * @return completable future for the Microsoft auth token
      * @see #acquireMSAuthCode(Consumer, Function, Executor)
      */
-    static CompletableFuture<String> acquireMSAuthCode(final Function<Boolean, @NotNull String> browserMessage, final Executor executor) {
+    static CompletableFuture<String> acquireMSAuthCode(final Function<Boolean, String> browserMessage, final Executor executor) {
         return acquireMSAuthCode(Util.getPlatform()::openUri, browserMessage, executor);
     }
 
@@ -293,7 +293,7 @@ public interface MCAccount {
      * @return completable future for the Microsoft auth token
      * @see #acquireMSAuthCode(Consumer, Function, Executor)
      */
-    static CompletableFuture<String> acquireMSAuthCode(final Function<Boolean, @NotNull String> browserMessage, final Executor executor, final @Nullable MicrosoftPrompt prompt) {
+    static CompletableFuture<String> acquireMSAuthCode(final Function<Boolean, String> browserMessage, final Executor executor, final @Nullable MicrosoftPrompt prompt) {
         return acquireMSAuthCode(Util.getPlatform()::openUri, browserMessage, executor, prompt);
     }
 
@@ -311,7 +311,7 @@ public interface MCAccount {
      * @param executor       executor to run the login task on
      * @return completable future for the Microsoft auth token
      */
-    static CompletableFuture<String> acquireMSAuthCode(final Consumer<URI> browserAction, final Function<Boolean, @NotNull String> browserMessage, final Executor executor) {
+    static CompletableFuture<String> acquireMSAuthCode(final Consumer<URI> browserAction, final Function<Boolean, String> browserMessage, final Executor executor) {
         return acquireMSAuthCode(browserAction, browserMessage, executor, null);
     }
 
@@ -330,7 +330,7 @@ public interface MCAccount {
      * @param prompt         optional Microsoft interaction prompt override
      * @return completable future for the Microsoft auth token
      */
-    static CompletableFuture<String> acquireMSAuthCode(final Consumer<URI> browserAction, final Function<Boolean, @NotNull String> browserMessage, final Executor executor, final @Nullable MicrosoftPrompt prompt) {
+    static CompletableFuture<String> acquireMSAuthCode(final Consumer<URI> browserAction, final Function<Boolean, String> browserMessage, final Executor executor, final @Nullable MicrosoftPrompt prompt) {
         return CompletableFuture.supplyAsync(() -> {
             LOGGER.info("Acquiring Microsoft auth code...");
             try {
@@ -340,7 +340,7 @@ public interface MCAccount {
                 // Prepare a temporary HTTP server we can listen for the OAuth2 callback on
                 final HttpServer server = HttpServer.create(new InetSocketAddress(25585), 0);
                 final CountDownLatch latch = new CountDownLatch(1); // track when a request has been handled
-                final AtomicReference<@Nullable String> authCode = new AtomicReference<>(null), errorMsg = new AtomicReference<>(null);
+                final AtomicReference<String> authCode = new AtomicReference<>(null), errorMsg = new AtomicReference<>(null);
 
                 server.createContext("/callback", exchange -> {
                     // Parse the query parameters
@@ -803,10 +803,10 @@ public interface MCAccount {
             Component success = Component.translatable("legacy.menu.choose_user.success", user.getName());
             FactoryAPIClient.getToasts().addToast(new LegacyTip(success, Minecraft.getInstance().font.width(success) + 110, 46) {
                 @Override
-                public void renderTip(GuiGraphics guiGraphics, int i, int j, float f, float l) {
-                    super.renderTip(guiGraphics, i, j, f, l);
+                public void renderTip(GuiGraphicsExtractor GuiGraphicsExtractor, int i, int j, float f, float l) {
+                    super.renderTip(GuiGraphicsExtractor, i, j, f, l);
                     GameProfile profile = /*? if >1.20.2 {*/Minecraft.getInstance().getGameProfile()/*?} else {*//*user.getGameProfile()*//*?}*/;
-                    PlayerFaceRenderer.draw(guiGraphics, Minecraft.getInstance().getSkinManager().createLookup(profile, true).get(), 7, (height() - 32) / 2, 32);
+                    PlayerFaceExtractor.extractRenderState(GuiGraphicsExtractor, Minecraft.getInstance().getSkinManager().createLookup(profile, true).get(), 7, (height() - 32) / 2, 32);
                 }
             }.centered().disappearTime(2400).canRemove(() -> user != Minecraft.getInstance().getUser()));
             lastSessionCheck.set(null);
@@ -822,7 +822,7 @@ public interface MCAccount {
         if (lastSessionCheck.get() != null && Util.getMillis() - lastSessionCheckTime.get() <= 180000)
             return lastSessionCheck.get();
         lastSessionCheckTime.set(Util.getMillis());
-        lastSessionCheck.set(true);
+        lastSessionCheck.set(false);
         CompletableFuture.runAsync(() -> {
             try {
                 String server = UUID.randomUUID().toString();

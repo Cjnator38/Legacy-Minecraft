@@ -1,7 +1,9 @@
 package wily.legacy.mixin.base.client;
 
-import net.minecraft.Util;
-import net.minecraft.client.gui.GuiGraphics;
+import com.llamalad7.mixinextras.injector.ModifyExpressionValue;
+import net.minecraft.network.chat.MutableComponent;
+import net.minecraft.util.Util;
+import net.minecraft.client.gui.GuiGraphicsExtractor;
 import net.minecraft.client.gui.components.AbstractButton;
 import net.minecraft.client.gui.components.AbstractWidget;
 import net.minecraft.client.input.KeyEvent;
@@ -12,10 +14,11 @@ import org.spongepowered.asm.mixin.Mixin;
 import org.spongepowered.asm.mixin.Unique;
 import org.spongepowered.asm.mixin.injection.At;
 import org.spongepowered.asm.mixin.injection.Inject;
-import org.spongepowered.asm.mixin.injection.ModifyVariable;
+import org.spongepowered.asm.mixin.injection.ModifyArg;
 import org.spongepowered.asm.mixin.injection.Redirect;
 import org.spongepowered.asm.mixin.injection.callback.CallbackInfo;
 import org.spongepowered.asm.mixin.injection.callback.CallbackInfoReturnable;
+import wily.legacy.client.CommonValue;
 import wily.legacy.util.client.LegacyRenderUtil;
 
 @Mixin(AbstractButton.class)
@@ -37,18 +40,20 @@ public abstract class AbstractButtonMixin extends AbstractWidget {
         lastTimePressed = Util.getMillis();
     }
 
-    @ModifyVariable(method = "renderWidget", at = @At(value = "STORE"), ordinal = 2)
-    protected int renderWidget(int k) {
-        return LegacyRenderUtil.getDefaultTextColor(!isHoveredOrFocused() || Util.getMillis() - lastTimePressed <= 150);
+    @ModifyArg(method = "extractDefaultLabel", at = @At(value = "INVOKE", target = "Lnet/minecraft/client/gui/components/AbstractButton;extractScrollingStringOverContents(Lnet/minecraft/client/gui/ActiveTextCollector;Lnet/minecraft/network/chat/Component;I)V"))
+    protected Component getMessage(Component original) {
+        MutableComponent copy = original.copy().withColor(LegacyRenderUtil.getDefaultTextColor(!isHoveredOrFocused() || Util.getMillis() - lastTimePressed <= 150));
+        if (!CommonValue.WIDGET_TEXT_SHADOW.get()) copy.withoutShadow();
+        return copy;
     }
 
-    @Inject(method = "renderWidget", at = @At("HEAD"))
-    protected void renderWidget(GuiGraphics guiGraphics, int i, int j, float f, CallbackInfo ci) {
+    @Inject(method = "extractWidgetRenderState", at = @At("HEAD"))
+    protected void extractWidgetRenderState(GuiGraphicsExtractor GuiGraphicsExtractor, int i, int j, float f, CallbackInfo ci) {
         alpha = active ? 1 : 0.8f;
     }
 
-    @Redirect(method = "renderWidget", at = @At(value = "FIELD", target = "Lnet/minecraft/client/gui/components/AbstractButton;active:Z", opcode = Opcodes.GETFIELD))
-    protected boolean renderWidget(AbstractButton instance) {
+    @Redirect(method = "extractDefaultSprite", at = @At(value = "FIELD", target = "Lnet/minecraft/client/gui/components/AbstractButton;active:Z", opcode = Opcodes.GETFIELD))
+    protected boolean extractDefaultSprite(AbstractButton instance) {
         return true;
     }
 

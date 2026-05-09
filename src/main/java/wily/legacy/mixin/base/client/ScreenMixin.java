@@ -2,13 +2,15 @@ package wily.legacy.mixin.base.client;
 
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.gui.ComponentPath;
-import net.minecraft.client.gui.GuiGraphics;
+import net.minecraft.client.gui.GuiGraphicsExtractor;
 import net.minecraft.client.gui.components.events.AbstractContainerEventHandler;
 import net.minecraft.client.gui.components.events.GuiEventListener;
 import net.minecraft.client.gui.screens.Screen;
 import net.minecraft.client.gui.screens.TitleScreen;
 import net.minecraft.client.gui.screens.inventory.AbstractContainerScreen;
 import net.minecraft.client.input.KeyEvent;
+import net.minecraft.network.chat.Component;
+import net.minecraft.world.item.ItemStack;
 import org.spongepowered.asm.mixin.Mixin;
 import org.spongepowered.asm.mixin.Shadow;
 import org.spongepowered.asm.mixin.injection.At;
@@ -23,8 +25,11 @@ import wily.legacy.client.LegacyTipManager;
 import wily.legacy.client.NavigationElement;
 import wily.legacy.client.screen.ControlTooltip;
 import wily.legacy.client.screen.LegacyLoading;
+import wily.legacy.util.LegacyItemUtil;
 import wily.legacy.util.client.LegacyRenderUtil;
 import wily.legacy.util.client.LegacySoundUtil;
+
+import java.util.List;
 
 @Mixin(Screen.class)
 public abstract class ScreenMixin extends AbstractContainerEventHandler {
@@ -41,17 +46,17 @@ public abstract class ScreenMixin extends AbstractContainerEventHandler {
         return (Screen) (Object) this;
     }
 
-    @Inject(method = "renderWithTooltipAndSubtitles", at = @At("HEAD"))
-    private void renderWithTooltip(GuiGraphics guiGraphics, int i, int j, float f, CallbackInfo ci) {
-        guiGraphics.pose().pushMatrix();
-        guiGraphics.pose().translate(LegacyTipManager.getTipXOffset(), 0);
+    @Inject(method = "extractRenderStateWithTooltipAndSubtitles", at = @At("HEAD"))
+    private void renderWithTooltip(GuiGraphicsExtractor GuiGraphicsExtractor, int i, int j, float f, CallbackInfo ci) {
+        GuiGraphicsExtractor.pose().pushMatrix();
+        GuiGraphicsExtractor.pose().translate(LegacyTipManager.getTipXOffset(), 0);
     }
 
-    @Inject(method = "renderWithTooltipAndSubtitles", at = @At("RETURN"))
-    private void renderWithTooltipReturn(GuiGraphics guiGraphics, int i, int j, float f, CallbackInfo ci) {
-        guiGraphics.pose().translate(-LegacyTipManager.getTipXOffset(), 0);
-        ControlTooltip.Renderer.of(this).render(guiGraphics, i, j, f);
-        guiGraphics.pose().popMatrix();
+    @Inject(method = "extractRenderStateWithTooltipAndSubtitles", at = @At("RETURN"))
+    private void renderWithTooltipReturn(GuiGraphicsExtractor GuiGraphicsExtractor, int i, int j, float f, CallbackInfo ci) {
+        GuiGraphicsExtractor.pose().translate(-LegacyTipManager.getTipXOffset(), 0);
+        ControlTooltip.Renderer.of(this).extractRenderState(GuiGraphicsExtractor, i, j, f);
+        GuiGraphicsExtractor.pose().popMatrix();
     }
 
     @Inject(method = "changeFocus", at = @At("HEAD"))
@@ -67,33 +72,38 @@ public abstract class ScreenMixin extends AbstractContainerEventHandler {
     }
 
     //? if >1.20.1 {
-    @Inject(method = "renderTransparentBackground", at = @At("HEAD"), cancellable = true)
-    public void renderTransparentBackground(GuiGraphics graphics, CallbackInfo ci) {
+    @Inject(method = "extractTransparentBackground", at = @At("HEAD"), cancellable = true)
+    public void extractTransparentBackground(GuiGraphicsExtractor graphics, CallbackInfo ci) {
         ci.cancel();
         if (self() instanceof AbstractContainerScreen<?> && !LegacyOptions.menusWithBackground.get()) return;
-        LegacyRenderUtil.renderTransparentBackground(graphics);
+        LegacyRenderUtil.extractTransparentBackground(graphics);
     }
 
     //?}
-    @Inject(method = "renderBackground", at = @At("HEAD"), cancellable = true)
-    public void renderBackground(GuiGraphics guiGraphics, /*? if >1.20.1 {*/int i, int j, float f,/*?}*/ CallbackInfo ci) {
+    @Inject(method = "extractBackground", at = @At("HEAD"), cancellable = true)
+    public void extractBackground(GuiGraphicsExtractor GuiGraphicsExtractor, /*? if >1.20.1 {*/int i, int j, float f,/*?}*/ CallbackInfo ci) {
         ci.cancel();
         if (UIAccessor.of(self()).getBoolean("hasBackground", true) && (!(self() instanceof AbstractContainerScreen<?>) || LegacyOptions.menusWithBackground.get())) {
-            LegacyRenderUtil.renderDefaultBackground(UIAccessor.of(self()), guiGraphics, false);
+            LegacyRenderUtil.renderDefaultBackground(UIAccessor.of(self()), GuiGraphicsExtractor, false);
         }
     }
 
     //? if >=1.20.5 {
-    @Inject(method = "renderPanorama", at = @At("HEAD"), cancellable = true)
-    public void renderPanorama(GuiGraphics guiGraphics, float f, CallbackInfo ci) {
+    @Inject(method = "extractPanorama", at = @At("HEAD"), cancellable = true)
+    public void renderPanorama(GuiGraphicsExtractor GuiGraphicsExtractor, float f, CallbackInfo ci) {
         ci.cancel();
-        LegacyRenderUtil.renderDefaultBackground(UIAccessor.of(self()), guiGraphics, true, false, !(self() instanceof TitleScreen));
+        LegacyRenderUtil.renderDefaultBackground(UIAccessor.of(self()), GuiGraphicsExtractor, true, false, !(self() instanceof TitleScreen));
     }
 
     //?}
     @Inject(method = "keyPressed", at = @At("HEAD"))
     private void keyPressed(KeyEvent keyEvent, CallbackInfoReturnable<Boolean> cir) {
         if (Legacy4JClient.keyToggleCursor.matches(keyEvent)) Legacy4JClient.controllerManager.toggleCursor();
+    }
+
+    @Inject(method = "getTooltipFromItem", at = @At("RETURN"), cancellable = true)
+    private static void getTooltipFromItem(Minecraft minecraft, ItemStack itemStack, CallbackInfoReturnable<List<Component>> cir) {
+        cir.setReturnValue(LegacyItemUtil.sanitizeTooltip(itemStack, cir.getReturnValue()));
     }
 
     @Redirect(method = "rebuildWidgets", at = @At(value = "INVOKE", target = "Lnet/minecraft/client/gui/screens/Screen;clearFocus()V"))
@@ -128,8 +138,8 @@ public abstract class ScreenMixin extends AbstractContainerEventHandler {
         Legacy4JClient.postScreenInit((Screen) (Object) this);
     }
 
-    @Inject(method = "init(Lnet/minecraft/client/Minecraft;II)V", at = @At(value = "INVOKE", target = "Lnet/minecraft/client/gui/screens/Screen;setInitialFocus()V", shift = At.Shift.AFTER))
-    public void init(Minecraft minecraft, int i, int j, CallbackInfo ci) {
+    @Inject(method = "init(II)V", at = @At(value = "INVOKE", target = "Lnet/minecraft/client/gui/screens/Screen;setInitialFocus()V", shift = At.Shift.AFTER))
+    public void init(int i, int j, CallbackInfo ci) {
         Legacy4JClient.postScreenInit((Screen) (Object) this);
     }
     //?}

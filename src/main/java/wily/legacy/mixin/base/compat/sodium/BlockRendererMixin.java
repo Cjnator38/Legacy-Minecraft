@@ -1,15 +1,12 @@
-//? if >=1.21 && (fabric || neoforge) {
+//? fabric || neoforge {
 package wily.legacy.mixin.base.compat.sodium;
 
 import com.llamalad7.mixinextras.sugar.Local;
 import com.llamalad7.mixinextras.sugar.ref.LocalRef;
 import net.caffeinemc.mods.sodium.client.render.chunk.compile.pipeline.BlockRenderer;
-import net.caffeinemc.mods.sodium.client.render.frapi.render.AbstractBlockRenderContext;
-//? if <1.21.5 {
-/*import net.minecraft.client.resources.model.BakedModel;
- *///?} else {
-import net.minecraft.client.renderer.block.model.BlockStateModel;
-//?}
+
+import net.caffeinemc.mods.sodium.client.render.model.AbstractBlockRenderContext;
+import net.minecraft.client.renderer.block.dispatch.BlockStateModel;
 import net.minecraft.core.BlockPos;
 import net.minecraft.world.level.block.state.BlockState;
 import org.spongepowered.asm.mixin.Mixin;

@@ -3,10 +3,9 @@ package wily.legacy.client;
 import com.mojang.blaze3d.platform.InputConstants;
 import com.mojang.serialization.Codec;
 import com.mojang.serialization.codecs.RecordCodecBuilder;
-import net.minecraft.Util;
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.gui.Font;
-import net.minecraft.client.gui.GuiGraphics;
+import net.minecraft.client.gui.GuiGraphicsExtractor;
 import net.minecraft.client.gui.components.AbstractWidget;
 import net.minecraft.client.gui.components.MultiLineLabel;
 import net.minecraft.client.gui.components.Tooltip;
@@ -19,7 +18,7 @@ import net.minecraft.client.gui.screens.packs.PackSelectionScreen;
 import net.minecraft.client.input.KeyEvent;
 import net.minecraft.client.input.MouseButtonEvent;
 import net.minecraft.network.chat.Component;
-import net.minecraft.resources.ResourceLocation;
+import net.minecraft.resources.Identifier;
 import net.minecraft.server.packs.repository.Pack;
 import net.minecraft.server.packs.repository.PackRepository;
 import org.jetbrains.annotations.Nullable;
@@ -30,8 +29,11 @@ import wily.factoryapi.base.config.FactoryConfig;
 import wily.factoryapi.util.FactoryScreenUtil;
 import wily.legacy.client.screen.ControlTooltip;
 import wily.legacy.client.screen.LegacyScrollRenderer;
+import wily.legacy.client.screen.Panel;
 import wily.legacy.client.screen.ScrollableRenderer;
 import wily.legacy.init.LegacyRegistries;
+import wily.legacy.skins.skin.CustomSkinPackStore;
+import wily.legacy.skins.skin.DownloadedSkinPackStore;
 import wily.legacy.util.LegacyComponents;
 import wily.legacy.util.LegacySprites;
 import wily.legacy.util.client.LegacyRenderUtil;
@@ -42,7 +44,6 @@ import java.util.ArrayList;
 import java.util.Collection;
 import java.util.Collections;
 import java.util.List;
-import java.util.function.BiFunction;
 import java.util.stream.Collectors;
 import java.util.stream.Stream;
 
@@ -57,7 +58,7 @@ public record GlobalPacks(List<String> list, boolean applyOnTop) {
         List<String> packs = new ArrayList<>(list());
         packs.removeIf(additional::contains);
         packs.addAll(applyOnTop ? 0 : packs.size(), additional);
-        repository.setSelected(packs);
+        repository.setSelected(CustomSkinPackStore.preserveSelection(repository, DownloadedSkinPackStore.preserveSelection(repository, packs)));
     }
 
     public GlobalPacks withPacks(List<String> packs) {
@@ -111,26 +112,26 @@ public record GlobalPacks(List<String> list, boolean applyOnTop) {
         }
 
         public static Selector resources(int i, int j, int k, int l, boolean hasTooltip) {
-            return new Selector(i, j, k, l, LegacyComponents.GLOBAL_RESOURCE_PACKS, LegacyComponents.SHOW_RESOURCE_PACKS, Minecraft.getInstance().getResourcePackRepository(), Minecraft.getInstance().getResourcePackDirectory(), globalResources, hasTooltip);
+            return new Selector(i, j, k, l, LegacyComponents.getGlobalResourcePacks(), LegacyComponents.getShowResourcePacks(), Minecraft.getInstance().getResourcePackRepository(), Minecraft.getInstance().getResourcePackDirectory(), globalResources, hasTooltip);
         }
 
         public List<Pack> getDisplayPacks() {
-            return Stream.concat(model.selected.stream(), model.unselected.stream()).toList();
+            return Stream.concat(model.selected.stream(), model.unselected.stream()).filter(pack -> !DownloadedResourceAlbums.isManagedPack(pack.getId()) && !DownloadedSkinPackStore.isManagedResourcePackId(pack.getId()) && !CustomSkinPackStore.isManagedResourcePackId(pack.getId())).toList();
         }
 
         public void updateTooltip() {
-            if (hasTooltip) setTooltip(Tooltip.create(selectedPack.getDescription(), selectedPack.getTitle()));
+            if (hasTooltip) setTooltip(Tooltip.create(DownloadedPackMetadata.getDescription(selectedPack), DownloadedPackMetadata.getTitle(selectedPack)));
         }
 
-        public void renderTooltipBox(GuiGraphics guiGraphics, LayoutElement panel) {
-            renderTooltipBox(guiGraphics, panel, 0);
+        public void renderTooltipBox(GuiGraphicsExtractor GuiGraphicsExtractor, LayoutElement panel) {
+            renderTooltipBox(GuiGraphicsExtractor, panel, 0);
         }
 
-        public void renderTooltipBox(GuiGraphics guiGraphics, LayoutElement panel, int xOffset) {
-            renderTooltipBox(guiGraphics, panel.getX() + panel.getWidth() - 2 + xOffset, panel.getY() + 5, PackAlbum.Selector.getDefaultWidth(), panel.getHeight() - 10);
+        public void renderTooltipBox(GuiGraphicsExtractor GuiGraphicsExtractor, LayoutElement panel, int xOffset) {
+            renderTooltipBox(GuiGraphicsExtractor, panel.getX() + panel.getWidth() - 2 + xOffset, panel.getY() + 5, PackAlbum.Selector.getDefaultWidth(), panel.getHeight() - 10);
         }
 
-        public void renderTooltipBox(GuiGraphics graphics, int x, int y, int width, int height) {
+        public void renderTooltipBox(GuiGraphicsExtractor graphics, int x, int y, int width, int height) {
             if (hasTooltip) return;
             LegacyRenderUtil.renderPointerPanel(graphics, x, y, width, height);
             if (selectedPack != null) {
@@ -139,17 +140,17 @@ public record GlobalPacks(List<String> list, boolean applyOnTop) {
                 int nameWidth = width - 53;
                 int lineHeight = sd ? 8 : 12;
                 FactoryGuiGraphics.of(graphics).enableScissor(x + 40, y + 4, x + 40 + nameWidth, y + 44);
-                (sd ? PackAlbum.Selector.sdLabelsCache : PackAlbum.Selector.labelsCache).apply(selectedPack.getTitle(), nameWidth).render(graphics, MultiLineLabel.Align.LEFT, x + (sd ? 40 : 43), y + 8, lineHeight, true, 0xFFFFFFFF);
+                (sd ? Panel.sdLabelsCache : Panel.labelsCache).apply(DownloadedPackMetadata.getTitle(selectedPack), nameWidth).visitLines(net.minecraft.client.gui.TextAlignment.LEFT, x + (sd ? 40 : 43), y + 8, lineHeight, graphics.textRenderer());
                 graphics.disableScissor();
-                ResourceLocation background = PackAlbum.Selector.getPackBackground(selectedPack);
+                Identifier background = PackAlbum.Selector.getPackBackground(selectedPack);
                 int descriptionWidth = width - 16;
-                MultiLineLabel label = (sd ? PackAlbum.Selector.sdLabelsCache : PackAlbum.Selector.labelsCache).apply(selectedPack.getDescription(), descriptionWidth);
+                MultiLineLabel label = (sd ? Panel.sdLabelsCache : Panel.labelsCache).apply(DownloadedPackMetadata.getDescription(selectedPack), descriptionWidth);
                 int descriptionFromBottom = sd ? 52 : 78;
                 int visibleLines = (height - 50 - (background == null ? 0 : descriptionFromBottom)) / lineHeight;
                 scrollableRenderer.scrolled.max = org.joml.Math.max(0, label.getLineCount() - visibleLines);
                 scrollableRenderer.lineHeight = lineHeight;
                 int left = x + (sd ? 5 : 8);
-                scrollableRenderer.render(graphics, left, y + 40, descriptionWidth, visibleLines * lineHeight, () -> label.render(graphics, MultiLineLabel.Align.LEFT, left, y + 40, lineHeight, true, 0xFFFFFFFF));
+                scrollableRenderer.extractRenderState(graphics, left, y + 40, descriptionWidth, visibleLines * lineHeight, () -> label.visitLines(net.minecraft.client.gui.TextAlignment.LEFT, left, y + 40, lineHeight, graphics.textRenderer()));
                 if (background != null)
                     FactoryGuiGraphics.of(graphics).blit(background, left, y + height - descriptionFromBottom, 0.0f, 0.0f, descriptionWidth, sd ? 47 : 72, descriptionWidth, sd ? 47 : 72);
             }
@@ -202,7 +203,7 @@ public record GlobalPacks(List<String> list, boolean applyOnTop) {
         }
 
         public List<String> getSelectedIds() {
-            return model.selected.stream().filter(p -> !FactoryAPIPlatform.isPackHidden(p) && !p.isRequired()).map(Pack::getId).collect(Collectors.collectingAndThen(Collectors.toList(), l -> {
+            return model.selected.stream().filter(p -> !FactoryAPIPlatform.isPackHidden(p) && !DownloadedResourceAlbums.isManagedPack(p.getId()) && !DownloadedSkinPackStore.isManagedResourcePackId(p.getId()) && !CustomSkinPackStore.isManagedResourcePackId(p.getId()) && !p.isRequired()).map(Pack::getId).collect(Collectors.collectingAndThen(Collectors.toList(), l -> {
                 Collections.reverse(l);
                 return l;
             }));
@@ -228,7 +229,7 @@ public record GlobalPacks(List<String> list, boolean applyOnTop) {
             if (minecraft.screen != null) {
                 Screen screen = minecraft.screen;
                 Collection<String> packs = packRepository.getSelectedIds();
-                packRepository.setSelected(getSelectedIds());
+                packRepository.setSelected(CustomSkinPackStore.preserveSelection(packRepository, DownloadedSkinPackStore.preserveSelection(packRepository, getSelectedIds())));
                 minecraft.setScreen(new PackSelectionScreen(packRepository, p -> {
                     updateModel();
                     packRepository.setSelected(packs);
@@ -275,31 +276,31 @@ public record GlobalPacks(List<String> list, boolean applyOnTop) {
         }
 
         @Override
-        protected void renderWidget(GuiGraphics guiGraphics, int i, int j, float f) {
+        protected void extractWidgetRenderState(GuiGraphicsExtractor GuiGraphicsExtractor, int i, int j, float f) {
             Font font = minecraft.font;
-            FactoryGuiGraphics.of(guiGraphics).blitSprite(LegacySprites.PANEL_RECESS, getX() - 1, getY() + font.lineHeight - 1, width + 2, height + 2 - minecraft.font.lineHeight);
+            FactoryGuiGraphics.of(GuiGraphicsExtractor).blitSprite(LegacySprites.PANEL_RECESS, getX() - 1, getY() + font.lineHeight - 1, width + 2, height + 2 - minecraft.font.lineHeight);
             List<Pack> displayPacks = getDisplayPacks();
             int visibleCount = 0;
             FactoryScreenUtil.enableBlend();
             for (int index = 0; index < displayPacks.size(); index++) {
                 if (visibleCount >= getMaxPacks() || scrolledList.get() + index >= displayPacks.size()) break;
-                FactoryGuiGraphics.of(guiGraphics).blit(PackAlbum.Selector.getPackIcon(displayPacks.get(scrolledList.get() + index)), getX() + 21 + 30 * index, getY() + font.lineHeight + 4, 0.0f, 0.0f, 28, 28, 28, 28);
+                FactoryGuiGraphics.of(GuiGraphicsExtractor).blit(PackAlbum.Selector.getPackIcon(displayPacks.get(scrolledList.get() + index)), getX() + 21 + 30 * index, getY() + font.lineHeight + 4, 0.0f, 0.0f, 28, 28, 28, 28);
                 if (model.selected.contains(displayPacks.get(scrolledList.get() + index)))
-                    FactoryGuiGraphics.of(guiGraphics).blitSprite(LegacySprites.PACK_SELECTED, getX() + 20 + 30 * index, getY() + font.lineHeight + 3, 30, 30);
+                    FactoryGuiGraphics.of(GuiGraphicsExtractor).blitSprite(LegacySprites.PACK_SELECTED, getX() + 20 + 30 * index, getY() + font.lineHeight + 3, 30, 30);
                 if (scrolledList.get() + index == selectedIndex)
-                    FactoryGuiGraphics.of(guiGraphics).blitSprite(LegacySprites.PACK_HIGHLIGHTED, getX() + 20 + 30 * index, getY() + font.lineHeight + 3, 30, 30);
+                    FactoryGuiGraphics.of(GuiGraphicsExtractor).blitSprite(LegacySprites.PACK_HIGHLIGHTED, getX() + 20 + 30 * index, getY() + font.lineHeight + 3, 30, 30);
                 visibleCount++;
             }
             FactoryScreenUtil.disableBlend();
-            guiGraphics.pose().pushMatrix();
-            if (!isHoveredOrFocused()) guiGraphics.pose().translate(0.4f, 0.4f);
-            guiGraphics.drawString(font, getMessage(), getX() + 2, getY(), isHoveredOrFocused() ? LegacyRenderUtil.getDefaultTextColor() : CommonColor.INVENTORY_GRAY_TEXT.get(), isHoveredOrFocused());
-            guiGraphics.pose().popMatrix();
+            GuiGraphicsExtractor.pose().pushMatrix();
+            if (!isHoveredOrFocused()) GuiGraphicsExtractor.pose().translate(0.4f, 0.4f);
+            GuiGraphicsExtractor.text(font, getMessage(), getX() + 2, getY(), isHoveredOrFocused() ? LegacyRenderUtil.getDefaultTextColor() : CommonColor.GRAY_TEXT.get(), isHoveredOrFocused());
+            GuiGraphicsExtractor.pose().popMatrix();
             if (scrolledList.max > 0) {
                 if (scrolledList.get() < scrolledList.max)
-                    scrollRenderer.renderScroll(guiGraphics, ScreenDirection.RIGHT, getX() + width - 12, getY() + font.lineHeight + (height - font.lineHeight - 11) / 2);
+                    scrollRenderer.renderScroll(GuiGraphicsExtractor, ScreenDirection.RIGHT, getX() + width - 12, getY() + font.lineHeight + (height - font.lineHeight - 11) / 2);
                 if (scrolledList.get() > 0)
-                    scrollRenderer.renderScroll(guiGraphics, ScreenDirection.LEFT, getX() + 8, getY() + font.lineHeight + (height - font.lineHeight - 11) / 2);
+                    scrollRenderer.renderScroll(GuiGraphicsExtractor, ScreenDirection.LEFT, getX() + 8, getY() + font.lineHeight + (height - font.lineHeight - 11) / 2);
             }
         }
 
@@ -310,7 +311,12 @@ public record GlobalPacks(List<String> list, boolean applyOnTop) {
 
         @Override
         public @Nullable Component getAction(Context context) {
-            return context.actionOfContext(KeyContext.class, k -> k.key() == InputConstants.KEY_X && isFocused() || k.key() == InputConstants.MOUSE_BUTTON_LEFT && isHovered() ? screenComponent : ControlTooltip.getSelectAction(this, context));
+            return context.actionOfContext(KeyContext.class, k -> {
+                if (LegacyOptions.displayPackManagementTooltips.get() && (k.key() == InputConstants.KEY_X && isFocused() || k.key() == InputConstants.MOUSE_BUTTON_LEFT && isHovered())) {
+                    return screenComponent;
+                }
+                return ControlTooltip.getSelectAction(this, context);
+            });
         }
     }
 }

@@ -1,17 +1,22 @@
 package wily.legacy.init;
 
+import com.mojang.serialization.Dynamic;
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.gui.components.Renderable;
 import net.minecraft.client.gui.layouts.LayoutElement;
-import net.minecraft.client.model.BookModel;
 import net.minecraft.client.model.geom.ModelLayers;
+import net.minecraft.client.model.object.book.BookModel;
+import net.minecraft.core.component.DataComponentMap;
+import net.minecraft.core.component.DataComponents;
+import net.minecraft.core.registries.BuiltInRegistries;
 import net.minecraft.network.chat.Component;
-import net.minecraft.resources.ResourceLocation;
+import net.minecraft.resources.Identifier;
 import net.minecraft.util.Mth;
 import net.minecraft.util.RandomSource;
 import net.minecraft.world.Container;
 import net.minecraft.world.SimpleContainer;
 import net.minecraft.world.inventory.Slot;
+import net.minecraft.world.item.Item;
 import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.phys.Vec2;
 import wily.factoryapi.FactoryAPI;
@@ -30,33 +35,39 @@ import java.util.ArrayList;
 import java.util.List;
 
 public class LegacyUIElementTypes {
-    public static final ResourceLocation ENCHANTING_TABLE_BOOK = FactoryAPI.createVanillaLocation("textures/entity/enchanting_table_book.png");
+    public static final Identifier ENCHANTING_TABLE_BOOK = FactoryAPI.createVanillaLocation("textures/entity/enchantment/enchanting_table_book.png");
+    private static boolean itemComponentsBound;
     public static final UIDefinitionManager.ElementType PUT_SCROLLABLE_RENDERER = UIDefinitionManager.ElementType.registerConditional("put_scrollable_renderer", UIDefinitionManager.ElementType.createIndexable(slots -> (uiDefinition, accessorFunction, elementName, element) -> {
+        bindItemComponents();
         uiDefinition.addStatic(UIDefinition.createBeforeInit(a -> {
             a.putStaticElement(elementName + ".renderables", UIAccessor.createRenderablesWrapper(a, new ArrayList<>()));
             a.putStaticElement(elementName, new ScrollableRenderer());
         }));
-        UIDefinitionManager.ElementType.parseElement(uiDefinition, elementName, element, "backgroundSprite", ResourceLocation.CODEC);
+        UIDefinitionManager.ElementType.parseElement(uiDefinition, elementName, element, "backgroundSprite", Identifier.CODEC);
         UIDefinitionManager.ElementType.parseElement(uiDefinition, elementName, element, "hasBackground", UIDefinitionManager.ElementType::parseBoolean);
-        UIDefinitionManager.ElementType.parseElements(uiDefinition, elementName, element, UIDefinitionManager.ElementType::parseNumber, "x", "y", "width", "height");
+        UIDefinitionManager.ElementType.parseElements(uiDefinition, elementName, element, UIDefinitionManager.ElementType::parseNumber, "x", "y", "contentX", "contentY", "width", "height", "lineHeight");
         UIDefinitionManager.parseAllElements(uiDefinition, a -> a.getElementValue(elementName + ".renderables", a, UIAccessor.class), element, s -> s);
-        uiDefinition.addStatic(UIDefinition.createAfterInit(a -> a.addRenderable(elementName, ((guiGraphics, i, j, f) -> {
+        uiDefinition.addStatic(UIDefinition.createAfterInit(a -> a.addRenderable(elementName, ((GuiGraphicsExtractor, i, j, f) -> {
             int x = a.getInteger(elementName + ".x", 0);
             int y = a.getInteger(elementName + ".y", 0);
+            int xd = a.getInteger(elementName + ".contentX", 11);
+            int yd = a.getInteger(elementName + ".contentY", 11);
             int width = a.getInteger(elementName + ".width", 0);
             int height = a.getInteger(elementName + ".height", 0);
+            int lineHeight = a.getInteger(elementName + ".lineHeight", 12);
             if (a.getBoolean(elementName + ".hasBackground", true))
-                LegacyRenderUtil.blitTranslucentOverlaySprite(guiGraphics, a.getResourceLocation(elementName + ".backgroundSprite", LegacySprites.POINTER_PANEL), x, y, width, height);
-            a.getElement(elementName, ScrollableRenderer.class).ifPresent(s -> s.render(guiGraphics, x + 11, y + 11, width - 22, height - 28, () -> {
+                LegacyRenderUtil.blitTranslucentOverlaySprite(GuiGraphicsExtractor, a.getResourceLocation(elementName + ".backgroundSprite", LegacySprites.POINTER_PANEL), x, y, width, height);
+            a.getElement(elementName, ScrollableRenderer.class).ifPresent(s -> s.extractRenderState(GuiGraphicsExtractor, x + xd, y + yd, width - 2 * xd, height - 2 * yd - 6, () -> {
                 int yOffset = 0;
                 for (Renderable r : a.getElementValue(elementName + ".renderables", a, UIAccessor.class).getChildrenRenderables()) {
                     if (r instanceof LayoutElement e) {
-                        e.setPosition(x + 11, y + 15 + yOffset);
-                        r.render(guiGraphics, i, j + Math.round(s.getYOffset()), f);
+                        e.setPosition(x + xd, y + yd + 4 + yOffset);
+                        r.extractRenderState(GuiGraphicsExtractor, i, j + Math.round(s.getYOffset()), f);
                         yOffset += e.getHeight();
                     }
                 }
-                s.scrolled.max = Math.max(0, Mth.ceil((yOffset - (height - 28)) / 12f));
+                s.lineHeight = lineHeight;
+                s.scrolled.max = Math.max(0, Mth.ceil((yOffset - (height - 2 * yd - 6.0f)) / lineHeight));
             }));
         }))));
     }));
@@ -103,8 +114,8 @@ public class LegacyUIElementTypes {
         UIDefinitionManager.ElementType.parseElements(uiDefinition, elementName, element, UIDefinitionManager.ElementType::parseNumber, "outline");
         UIDefinitionManager.ElementType.parseElements(uiDefinition, elementName, element, UIDefinitionManager.ElementType::parseNumber, "x", "y", "color", "outlineColor", "order");
         UIDefinitionManager.ElementType.parseTranslationElements(uiDefinition, elementName, element);
-        uiDefinition.addStatic(UIDefinition.createAfterInit(a -> accessorFunction.apply(a).addRenderable(elementName, a.createModifiableRenderable(elementName, (guiGraphics, i, j, f) -> {
-            a.getElement(elementName + ".component", Component.class).ifPresent((c) -> LegacyRenderUtil.drawOutlinedString(guiGraphics, Minecraft.getInstance().font, c, a.getInteger(elementName + ".x", 0), a.getInteger(elementName + ".y", 0), a.getInteger(elementName + ".color", 16777215), a.getInteger(elementName + ".outlineColor", 0xFF000000), a.getFloat(elementName + ".outline", 0.5f)));
+        uiDefinition.addStatic(UIDefinition.createAfterInit(a -> accessorFunction.apply(a).addRenderable(elementName, a.createModifiableRenderable(elementName, (GuiGraphicsExtractor, i, j, f) -> {
+            a.getElement(elementName + ".component", Component.class).ifPresent((c) -> LegacyRenderUtil.drawOutlinedString(GuiGraphicsExtractor, Minecraft.getInstance().font, c, a.getInteger(elementName + ".x", 0), a.getInteger(elementName + ".y", 0), a.getInteger(elementName + ".color", 16777215), a.getInteger(elementName + ".outlineColor", 0xFF000000), a.getFloat(elementName + ".outline", 0.5f)));
         }))));
     }));
     public static final UIDefinitionManager.ElementType RENDER_ENCHANTED_BOOK = UIDefinitionManager.ElementType.registerConditional("render_enchanted_book", UIDefinitionManager.ElementType.createIndexable(slots -> (uiDefinition, accessorFunction, elementName, element) -> {
@@ -118,7 +129,7 @@ public class LegacyUIElementTypes {
         RandomSource random = RandomSource.create();
         Bearer<Boolean> canOpenBook = Bearer.of(false);
         uiDefinition.addStatic(UIDefinition.createBeforeInit(a -> {
-            if (!a.initialized()) {
+            if (!a.initialized() || bookModel.isEmpty()) {
                 bookModel.set(new BookModel(Minecraft.getInstance().getEntityModels().bakeLayer(ModelLayers.BOOK)));
                 flip.set(0f);
                 oFlip.set(0f);
@@ -149,22 +160,23 @@ public class LegacyUIElementTypes {
         }));
         UIDefinitionManager.ElementType.parseElements(uiDefinition, elementName, element, UIDefinitionManager.ElementType::parseNumber, "x", "y", "width", "height", "scale");
         UIDefinitionManager.ElementType.parseTranslationElements(uiDefinition, elementName, element);
-        uiDefinition.addStatic(UIDefinition.createAfterInit(a -> accessorFunction.apply(a).addRenderable(elementName, a.createModifiableRenderable(elementName, (guiGraphics, i, j, f) -> {
+        uiDefinition.addStatic(UIDefinition.createAfterInit(a -> accessorFunction.apply(a).addRenderable(elementName, a.createModifiableRenderable(elementName, (GuiGraphicsExtractor, i, j, f) -> {
             float g = Mth.lerp(f, oOpen.get(), open.get());
             float f1 = Mth.lerp(f, oFlip.get(), flip.get());
             int x = a.getInteger(elementName + ".x", 0);
             int y = a.getInteger(elementName + ".y", 0);
-            guiGraphics.submitBookModelRenderState(bookModel.get(), ENCHANTING_TABLE_BOOK, a.getFloat(elementName + ".scale", 40.0f), g, f1, x, y, x + a.getInteger(elementName + ".width", 38), y + a.getInteger(elementName + ".height", 31));
+            if (bookModel.isPresent())
+                GuiGraphicsExtractor.book(bookModel.get(), ENCHANTING_TABLE_BOOK, a.getFloat(elementName + ".scale", 40.0f), g, f1, x, y, x + a.getInteger(elementName + ".width", 38), y + a.getInteger(elementName + ".height", 31));
         }))));
     }));
     public static final UIDefinitionManager.ElementType PUT_TOGGLEABLE_TAB_SPRITES = UIDefinitionManager.ElementType.registerCodec("put_toggleable_tab_sprites", LegacyTabButton.ToggleableTabSprites.CODEC);
     public static final UIDefinitionManager.ElementType PUT_TAB_STATE_OFFSET = UIDefinitionManager.ElementType.registerCodec("put_tab_state_offset", LegacyTabButton.StateOffset.CODEC);
     private static final Container emptyFakeContainer = new SimpleContainer();
     public static final UIDefinitionManager.ElementType PUT_LEGACY_SLOT = UIDefinitionManager.ElementType.registerConditional("put_legacy_slot", UIDefinitionManager.ElementType.createIndexable(slots -> (uiDefinition, accessorFunction, elementName, element) -> {
-        UIDefinitionManager.ElementType.parseElement(uiDefinition, elementName, element, "fakeContainer", (s, d) -> d.asListOpt(d1 -> DynamicUtil.getItemFromDynamic(d1, true)).result().map(l -> UIDefinition.createBeforeInit(a -> a.putStaticElement(s, new SimpleContainer(l.stream().map(ArbitrarySupplier::get).toArray(ItemStack[]::new))))).orElse(null));
-        UIDefinitionManager.ElementType.parseElement(uiDefinition, elementName, element, "fakeItem", (s, d) -> UIDefinitionManager.ElementType.parseItemStackElement(s, d));
-        UIDefinitionManager.ElementType.parseElement(uiDefinition, elementName, element, "spriteOverride", ResourceLocation.CODEC);
-        UIDefinitionManager.ElementType.parseElement(uiDefinition, elementName, element, "iconSprite", ResourceLocation.CODEC);
+        UIDefinitionManager.ElementType.parseElement(uiDefinition, elementName, element, "fakeContainer", LegacyUIElementTypes::parseFakeContainer);
+        UIDefinitionManager.ElementType.parseElement(uiDefinition, elementName, element, "fakeItem", LegacyUIElementTypes::parseFakeItem);
+        UIDefinitionManager.ElementType.parseElement(uiDefinition, elementName, element, "spriteOverride", Identifier.CODEC);
+        UIDefinitionManager.ElementType.parseElement(uiDefinition, elementName, element, "iconSprite", Identifier.CODEC);
         UIDefinitionManager.ElementType.parseElement(uiDefinition, elementName, element, "offset", DynamicUtil.VEC3_OBJECT_CODEC);
         UIDefinitionManager.ElementType.parseElements(uiDefinition, elementName, element, UIDefinitionManager.ElementType::parseBoolean, "iconCondition", "iconHolderCondition", "isVisible", "isFake", "isWarning");
         UIDefinitionManager.ElementType.parseElements(uiDefinition, elementName, element, UIDefinitionManager.ElementType::parseNumber, "x", "y", "width", "height");
@@ -208,13 +220,13 @@ public class LegacyUIElementTypes {
                     }
 
                     @Override
-                    public ResourceLocation getIconSprite() {
-                        return a.getBoolean(elementName + ".iconCondition", true) ? a.getElementValue(elementName + ".iconSprite", LegacySlotDisplay.super.getIconSprite(), ResourceLocation.class) : null;
+                    public Identifier getIconSprite() {
+                        return a.getBoolean(elementName + ".iconCondition", true) ? a.getElementValue(elementName + ".iconSprite", LegacySlotDisplay.super.getIconSprite(), Identifier.class) : null;
                     }
 
                     @Override
-                    public ArbitrarySupplier<ResourceLocation> getIconHolderOverride() {
-                        return a.getBoolean(elementName + ".iconHolderCondition", true) ? a.getElement(elementName + ".spriteOverride", ResourceLocation.class).or(LegacySlotDisplay.super.getIconHolderOverride()) : ArbitrarySupplier.empty();
+                    public ArbitrarySupplier<Identifier> getIconHolderOverride() {
+                        return a.getBoolean(elementName + ".iconHolderCondition", true) ? a.getElement(elementName + ".spriteOverride", Identifier.class).or(LegacySlotDisplay.super.getIconHolderOverride()) : ArbitrarySupplier.empty();
                     }
 
                     @Override
@@ -228,6 +240,36 @@ public class LegacyUIElementTypes {
             });
         }));
     }));
+
+    private static UIDefinition parseFakeContainer(String field, Dynamic<?> dynamic) {
+        return dynamic.asListOpt(d -> d).result().map(items -> UIDefinition.createBeforeInit(a -> {
+            ItemStack[] stacks = items.stream().map(LegacyUIElementTypes::parseStack).toArray(ItemStack[]::new);
+            a.putStaticElement(field, new SimpleContainer(stacks));
+        })).orElse(null);
+    }
+
+    private static UIDefinition parseFakeItem(String field, Dynamic<?> dynamic) {
+        return UIDefinition.createBeforeInit(a -> a.putStaticElement(field, parseStack(dynamic)));
+    }
+
+    private static ItemStack parseStack(Dynamic<?> dynamic) {
+        bindItemComponents();
+        return DynamicUtil.getItemFromDynamic(dynamic, true).get();
+    }
+
+    private static void bindItemComponents() {
+        if (itemComponentsBound) return;
+        BuiltInRegistries.ITEM.stream().filter(item -> !item.builtInRegistryHolder().areComponentsBound()).forEach(item -> item.builtInRegistryHolder().bindComponents(createItemComponents(item)));
+        itemComponentsBound = true;
+    }
+
+    private static DataComponentMap createItemComponents(Item item) {
+        return DataComponentMap.builder()
+                .addAll(DataComponents.COMMON_ITEM_COMPONENTS)
+                .set(DataComponents.ITEM_NAME, Component.translatable(item.getDescriptionId()))
+                .set(DataComponents.ITEM_MODEL, BuiltInRegistries.ITEM.getKey(item))
+                .build();
+    }
 
     public static void init() {
     }

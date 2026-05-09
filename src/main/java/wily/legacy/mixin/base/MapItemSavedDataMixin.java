@@ -8,6 +8,7 @@ import net.minecraft.resources.ResourceKey;
 import net.minecraft.server.MinecraftServer;
 import net.minecraft.server.level.ServerPlayer;
 import net.minecraft.util.Mth;
+import net.minecraft.world.entity.decoration.ItemFrame;
 import net.minecraft.world.entity.player.Inventory;
 import net.minecraft.world.entity.player.Player;
 import net.minecraft.world.item.ItemStack;
@@ -68,7 +69,7 @@ public abstract class MapItemSavedDataMixin {
 
     @Inject(method = "createFresh", at = @At("HEAD"), cancellable = true)
     private static void createFresh(double d, double e, byte b, boolean bl, boolean bl2, ResourceKey<Level> resourceKey, CallbackInfoReturnable<MapItemSavedData> cir) {
-        if (FactoryAPI.currentServer != null && !FactoryAPI.currentServer.getGameRules().getBoolean(LegacyGameRules.LEGACY_MAP_GRID))
+        if (FactoryAPI.currentServer != null && !FactoryAPI.currentServer.overworld().getGameRules().get(LegacyGameRules.LEGACY_MAP_GRID.get()))
             return;
         int i = 128 * (1 << b);
         cir.setReturnValue(new MapItemSavedData((((int) d + (i / 2) * Mth.sign(d)) / i) * i, (((int) e + (i / 2) * Mth.sign(e)) / i) * i, b, bl, bl2, false, resourceKey));
@@ -87,7 +88,7 @@ public abstract class MapItemSavedDataMixin {
     @ModifyExpressionValue(method = "tickCarriedBy", at = @At(value = "INVOKE", target = "Ljava/util/Map;containsKey(Ljava/lang/Object;)Z", ordinal = 0))
     public boolean tickCarriedByAddGlobalPlayers(boolean original, Player player) {
         MinecraftServer server = FactoryAPIPlatform.getEntityServer(player);
-        if (!server.getGameRules().getBoolean(LegacyGameRules.GLOBAL_MAP_PLAYER_ICON)) return original;
+        if (!server.overworld().getGameRules().get(LegacyGameRules.GLOBAL_MAP_PLAYER_ICON.get())) return original;
         if (player instanceof ServerPlayer sp && server != null) {
             server.getPlayerList().getPlayers().forEach(p -> {
                 if (!carriedByPlayers.containsKey(p)) {
@@ -105,7 +106,7 @@ public abstract class MapItemSavedDataMixin {
 
     @ModifyExpressionValue(method = "tickCarriedBy", at = @At(value = "INVOKE", target = "Lnet/minecraft/world/entity/player/Inventory;contains(Ljava/util/function/Predicate;)Z"))
     public boolean tickCarriedByRemoveInvalid(boolean original, Player player) {
-        return FactoryAPIPlatform.getEntityServer(player).getGameRules().getBoolean(LegacyGameRules.GLOBAL_MAP_PLAYER_ICON) || original;
+        return FactoryAPIPlatform.getEntityServer(player).overworld().getGameRules().get(LegacyGameRules.GLOBAL_MAP_PLAYER_ICON.get()) || original;
     }
 
     @ModifyArg(method = "tickCarriedBy", at = @At(value = "INVOKE", target = "Lnet/minecraft/world/level/saveddata/maps/MapItemSavedData;addDecoration(Lnet/minecraft/core/Holder;Lnet/minecraft/world/level/LevelAccessor;Ljava/lang/String;DDDLnet/minecraft/network/chat/Component;)V", ordinal = 0))
@@ -114,7 +115,7 @@ public abstract class MapItemSavedDataMixin {
     }
 
     @Inject(method = "tickCarriedBy", at = @At("RETURN"), cancellable = true)
-    private void tickCarriedBy(Player player, ItemStack itemStack, CallbackInfo ci) {
+    private void tickCarriedBy(Player player, ItemStack itemStack, ItemFrame itemFrame, CallbackInfo ci) {
         var iterator = LegacyWorldOptions.usedEndPortalPositions.get().iterator();
         boolean modified = false;
         while (iterator.hasNext()) {
@@ -135,7 +136,7 @@ public abstract class MapItemSavedDataMixin {
 
     @Inject(method = "scaled", at = @At("HEAD"), cancellable = true)
     public void scaled(CallbackInfoReturnable<MapItemSavedData> cir) {
-        if (FactoryAPI.currentServer != null && !FactoryAPI.currentServer.getGameRules().getBoolean(LegacyGameRules.LEGACY_MAP_GRID))
+        if (FactoryAPI.currentServer != null && !FactoryAPI.currentServer.overworld().getGameRules().get(LegacyGameRules.LEGACY_MAP_GRID.get()))
             return;
         int i = 128 * (1 << (scale));
         cir.setReturnValue(MapItemSavedData.createFresh(this.centerX - (i / 2) * Mth.sign(this.centerX), this.centerZ - (i / 2) * Mth.sign(this.centerZ), (byte) Mth.clamp(this.scale + 1, 0, 4), this.trackingPosition, this.unlimitedTracking, this.dimension));

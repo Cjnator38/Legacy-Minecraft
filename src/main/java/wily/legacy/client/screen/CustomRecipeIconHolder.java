@@ -2,11 +2,11 @@ package wily.legacy.client.screen;
 
 import com.mojang.blaze3d.platform.InputConstants;
 import net.minecraft.client.Minecraft;
-import net.minecraft.client.gui.GuiGraphics;
+import net.minecraft.client.gui.GuiGraphicsExtractor;
 import net.minecraft.client.input.InputWithModifiers;
 import net.minecraft.client.input.KeyEvent;
 import net.minecraft.network.chat.Component;
-import net.minecraft.resources.ResourceLocation;
+import net.minecraft.resources.Identifier;
 import net.minecraft.world.entity.player.Inventory;
 import net.minecraft.world.inventory.CraftingContainer;
 import net.minecraft.world.inventory.Slot;
@@ -157,7 +157,7 @@ public abstract class CustomRecipeIconHolder extends LegacyIconHolder implements
         CommonNetwork.sendToServer(new ServerMenuCraftPayload(getRecipeId(), List.copyOf(getIngredientsGrid()), -1, input.hasShiftDown() || ControllerBinding.LEFT_STICK_BUTTON.state().pressed));
     }
 
-    public Optional<ResourceLocation> getRecipeId() {
+    public Optional<Identifier> getRecipeId() {
         return Optional.empty();
     }
 
@@ -174,7 +174,7 @@ public abstract class CustomRecipeIconHolder extends LegacyIconHolder implements
     }
 
     @Override
-    public void render(GuiGraphics graphics, int i, int j, float f) {
+    public void extractRenderState(GuiGraphicsExtractor graphics, int i, int j, float f) {
         if (itemIcon.isEmpty() || (applyNextItemIfAbsent() && !hasItem(itemIcon)) || isFocused()) {
             nextItem = nextItem();
             previousItem = previousItem();
@@ -183,7 +183,7 @@ public abstract class CustomRecipeIconHolder extends LegacyIconHolder implements
             itemIcon = nextItem;
             if (isFocused()) updateRecipe();
         }
-        super.render(graphics, i, j, f);
+        super.extractRenderState(graphics, i, j, f);
     }
 
     protected boolean hasItem() {
@@ -195,7 +195,7 @@ public abstract class CustomRecipeIconHolder extends LegacyIconHolder implements
     }
 
     @Override
-    public void renderItem(GuiGraphics graphics, int i, int j, float f) {
+    public void renderItem(GuiGraphicsExtractor graphics, int i, int j, float f) {
         LegacyGuiItemRenderer.secureTranslucentRender(!itemIcon.isEmpty() && !hasItem(itemIcon), 0.5f, (u) -> renderItem(graphics, itemIcon, getX(), getY(), false));
     }
 
@@ -225,13 +225,13 @@ public abstract class CustomRecipeIconHolder extends LegacyIconHolder implements
     }
 
     @Override
-    public void renderSelection(GuiGraphics graphics, int i, int j, float f) {
+    public void renderSelection(GuiGraphicsExtractor graphics, int i, int j, float f) {
         super.renderSelection(graphics, i, j, f);
         int matchSlot;
         if (!itemIcon.isEmpty() && hasItem(itemIcon) && minecraft.screen instanceof LegacyMenuAccess<?> a && (matchSlot = findInventoryMatchSlot()) > 0) {
             Slot s = a.getMenu().getSlot(matchSlot);
             LegacyIconHolder h = LegacyRenderUtil.iconHolderRenderer.slotBounds(a.getMenuRectangle().left(), a.getMenuRectangle().top(), s);
-            h.render(graphics, i, j, f);
+            h.extractRenderState(graphics, i, j, f);
             h.itemIcon = s.getItem();
             h.renderHighlight(graphics);
             h.renderItem(graphics, i, j, f);

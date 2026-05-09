@@ -4,11 +4,13 @@ import com.google.gson.JsonArray;
 import com.google.gson.JsonElement;
 import com.google.gson.JsonObject;
 import com.google.gson.JsonPrimitive;
+import it.unimi.dsi.fastutil.objects.Object2IntOpenHashMap;
 import com.mojang.blaze3d.platform.InputConstants;
 import it.unimi.dsi.fastutil.objects.Object2IntMap;
 import net.minecraft.client.Minecraft;
-import net.minecraft.client.gui.GuiGraphics;
+import net.minecraft.client.gui.GuiGraphicsExtractor;
 import net.minecraft.client.gui.components.AbstractWidget;
+import net.minecraft.client.gui.components.Renderable;
 import net.minecraft.client.gui.narration.NarrationElementOutput;
 import net.minecraft.client.gui.screens.Screen;
 import net.minecraft.client.gui.screens.achievement.StatsScreen;
@@ -18,7 +20,7 @@ import net.minecraft.network.chat.CommonComponents;
 import net.minecraft.network.chat.Component;
 import net.minecraft.network.chat.Style;
 import net.minecraft.network.protocol.game.ServerboundClientCommandPacket;
-import net.minecraft.resources.ResourceLocation;
+import net.minecraft.resources.Identifier;
 import net.minecraft.server.packs.resources.ResourceManager;
 import net.minecraft.server.packs.resources.ResourceManagerReloadListener;
 import net.minecraft.stats.Stat;
@@ -34,7 +36,6 @@ import wily.factoryapi.base.Stocker;
 import wily.factoryapi.base.client.FactoryGuiGraphics;
 import wily.factoryapi.base.client.SimpleLayoutRenderable;
 import wily.factoryapi.base.network.CommonNetwork;
-import wily.factoryapi.util.FactoryScreenUtil;
 import wily.legacy.Legacy4J;
 import wily.legacy.Legacy4JClient;
 import wily.legacy.client.CommonColor;
@@ -51,6 +52,8 @@ import wily.legacy.util.client.LegacyRenderUtil;
 
 import java.io.BufferedReader;
 import java.io.IOException;
+import java.nio.file.Files;
+import java.nio.file.Path;
 import java.util.*;
 import java.util.function.Predicate;
 
@@ -67,16 +70,36 @@ public class LeaderboardsScreen extends PanelVListScreen {
     protected int lastStatsInScreen = 0;
     protected int page = 0;
     protected int updateTimer = 0;
-    protected List<LegacyPlayerInfo> actualRankBoard = Collections.emptyList();
+    protected List<LeaderboardEntry> actualRankBoard = Collections.emptyList();
+    protected final boolean localAggregateMode;
+    protected final LeaderboardEntry localAggregateEntry;
 
     public LeaderboardsScreen(Screen parent) {
         super(parent, s -> Panel.createPanel(s, p -> p.appearance(568, 275)), CommonComponents.EMPTY);
+        localAggregateMode = false;
+        localAggregateEntry = null;
+        rebuildRenderableVList(Minecraft.getInstance());
+        renderableVList.layoutSpacing(l -> 1);
+    }
+
+    public LeaderboardsScreen(Screen parent, LeaderboardEntry localAggregateEntry) {
+        super(parent, s -> Panel.createPanel(s, p -> p.appearance(568, 275)), CommonComponents.EMPTY);
+        localAggregateMode = true;
+        this.localAggregateEntry = localAggregateEntry;
+        refreshStatsBoards(localAggregateEntry == null ? new Object2IntOpenHashMap<>() : localAggregateEntry.statsMap());
+        selectFirstNonEmptyBoard();
         rebuildRenderableVList(Minecraft.getInstance());
         renderableVList.layoutSpacing(l -> 1);
     }
 
     public static Screen getActualLeaderboardsScreenInstance(Screen parent) {
         return LegacyOptions.legacyLeaderboards.get() ? new LeaderboardsScreen(parent) : new StatsScreen(parent, Minecraft.getInstance().player.getStats());
+    }
+
+    public static Screen getOverallLeaderboardsScreenInstance(Screen parent) {
+        Minecraft minecraft = Minecraft.getInstance();
+        Object2IntMap<Stat<?>> aggregateStats = loadOverallStats(minecraft);
+        return new LeaderboardsScreen(parent, createAggregateEntry(minecraft, aggregateStats));
     }
 
     public static void refreshStatsBoards(Minecraft minecraft) {
@@ -94,6 +117,73 @@ public class LeaderboardsScreen extends PanelVListScreen {
                 for (StatsBoard statsBoard : statsBoards) if (statsBoard.add(s)) break;
             });
         }
+    }
+
+    public static void refreshStatsBoards(Object2IntMap<Stat<?>> statsMap) {
+        statsBoards.forEach(StatsBoard::clear);
+        statsMap.object2IntEntrySet().forEach(entry -> {
+            if (entry.getIntValue() <= 0) return;
+            for (StatsBoard statsBoard : statsBoards) if (statsBoard.add(entry.getKey())) break;
+        });
+    }
+
+    private static LeaderboardEntry createAggregateEntry(Minecraft minecraft, Object2IntMap<Stat<?>> aggregateStats) {
+        return new LeaderboardEntry(minecraft.getUser().getName(), aggregateStats);
+    }
+
+    private static Object2IntMap<Stat<?>> loadOverallStats(Minecraft minecraft) {
+        Object2IntOpenHashMap<Stat<?>> aggregateStats = new Object2IntOpenHashMap<>();
+        UUID profileId = minecraft.getUser().getProfileId();
+        if (profileId == null) return aggregateStats;
+        Path savesPath = minecraft.gameDirectory.toPath().resolve("saves");
+        if (!Files.isDirectory(savesPath)) return aggregateStats;
+        try (var worlds = Files.list(savesPath)) {
+            worlds.filter(Files::isDirectory).forEach(worldPath -> loadWorldStats(worldPath.resolve("stats").resolve(profileId + ".json"), aggregateStats));
+        } catch (IOException e) {
+            Legacy4J.LOGGER.warn("Failed to scan save stats for main-menu leaderboards", e);
+        }
+        return aggregateStats;
+    }
+
+    private static void loadWorldStats(Path statsPath, Object2IntOpenHashMap<Stat<?>> aggregateStats) {
+        if (!Files.isRegularFile(statsPath)) return;
+        try (BufferedReader reader = Files.newBufferedReader(statsPath)) {
+            JsonObject root = GsonHelper.parse(reader);
+            JsonObject statsRoot = GsonHelper.getAsJsonObject(root, "stats", new JsonObject());
+            for (var statTypeEntry : statsRoot.entrySet()) {
+                if (!(statTypeEntry.getValue() instanceof JsonObject statsByValue)) continue;
+                Identifier statTypeId = Identifier.tryParse(statTypeEntry.getKey());
+                if (statTypeId == null) continue;
+                addStatsByType(aggregateStats, statTypeId, statsByValue);
+            }
+        } catch (Exception e) {
+            Legacy4J.LOGGER.warn("Failed to load stats from {}", statsPath, e);
+        }
+    }
+
+    @SuppressWarnings({"unchecked", "rawtypes"})
+    private static void addStatsByType(Object2IntOpenHashMap<Stat<?>> aggregateStats, Identifier statTypeId, JsonObject statsByValue) {
+        StatType statType = FactoryAPIPlatform.getRegistryValue(statTypeId, BuiltInRegistries.STAT_TYPE);
+        if (statType == null) return;
+        for (var statEntry : statsByValue.entrySet()) {
+            if (!(statEntry.getValue() instanceof JsonPrimitive primitive) || !primitive.isNumber()) continue;
+            Identifier statValueId = Identifier.tryParse(statEntry.getKey());
+            if (statValueId == null) continue;
+            Object statValue = FactoryAPIPlatform.getRegistryValue(statValueId, statType.getRegistry());
+            if (statValue == null) continue;
+            Stat<?> stat = statType.get(statValue);
+            aggregateStats.put(stat, aggregateStats.getInt(stat) + primitive.getAsInt());
+        }
+    }
+
+    private void selectFirstNonEmptyBoard() {
+        for (int i = 0; i < statsBoards.size(); i++) {
+            if (!statsBoards.get(i).statsList.isEmpty()) {
+                selectedStatBoard = i;
+                return;
+            }
+        }
+        selectedStatBoard = 0;
     }
 
     @Override
@@ -151,34 +241,51 @@ public class LeaderboardsScreen extends PanelVListScreen {
 
     public void rebuildRenderableVList(Minecraft minecraft) {
         renderableVList.renderables.clear();
-        if (minecraft.getConnection() == null || statsBoards.get(selectedStatBoard).statsList.isEmpty()) return;
-        actualRankBoard = Legacy4JClient.hasModOnServer() && filter.get() != 1 ? minecraft.getConnection().getOnlinePlayers().stream().map(p -> ((LegacyPlayerInfo) p)).filter(info -> info.getStatsMap().object2IntEntrySet().stream().filter(s -> statsBoards.get(selectedStatBoard).statsList.contains(s.getKey())).mapToInt(Object2IntMap.Entry::getIntValue).sum() > 0).sorted(filter.get() == 0 ? Comparator.comparingInt(info -> ((LegacyPlayerInfo) info).getStatsMap().object2IntEntrySet().stream().filter(s -> statsBoards.get(selectedStatBoard).statsList.contains(s.getKey())).mapToInt(Object2IntMap.Entry::getIntValue).sum()).reversed() : Comparator.comparing((LegacyPlayerInfo l) -> l.legacyMinecraft$getProfile().name())).toList() : List.of((LegacyPlayerInfo) minecraft.getConnection().getPlayerInfo(minecraft.player.getUUID()));
+        if (statsBoards.get(selectedStatBoard).statsList.isEmpty()) {
+            actualRankBoard = Collections.emptyList();
+            return;
+        }
+        if (localAggregateMode) {
+            actualRankBoard = localAggregateEntry == null || localAggregateEntry.statsMap().isEmpty() ? Collections.emptyList() : List.of(localAggregateEntry);
+        } else {
+            if (minecraft.getConnection() == null) {
+                actualRankBoard = Collections.emptyList();
+                return;
+            }
+            actualRankBoard = Legacy4JClient.hasModOnServer() && filter.get() != 1
+                    ? minecraft.getConnection().getOnlinePlayers().stream()
+                    .map(p -> new LeaderboardEntry(((LegacyPlayerInfo) p).legacyMinecraft$getProfile().name(), ((LegacyPlayerInfo) p).getStatsMap()))
+                    .filter(entry -> entry.statsMap().object2IntEntrySet().stream().filter(s -> statsBoards.get(selectedStatBoard).statsList.contains(s.getKey())).mapToInt(Object2IntMap.Entry::getIntValue).sum() > 0)
+                    .sorted(filter.get() == 0 ? Comparator.comparingInt((LeaderboardEntry entry) -> entry.statsMap().object2IntEntrySet().stream().filter(s -> statsBoards.get(selectedStatBoard).statsList.contains(s.getKey())).mapToInt(Object2IntMap.Entry::getIntValue).sum()).reversed() : Comparator.comparing(LeaderboardEntry::name))
+                    .toList()
+                    : List.of(new LeaderboardEntry(minecraft.getConnection().getPlayerInfo(minecraft.player.getUUID()).getProfile().name(), minecraft.player.getStats().stats));
+        }
         for (int i = 0; i < actualRankBoard.size(); i++) {
-            LegacyPlayerInfo info = actualRankBoard.get(i);
+            LeaderboardEntry info = actualRankBoard.get(i);
             String rank = i + 1 + "";
-            renderableVList.renderables.add(new AbstractWidget(0, 0, 551, 20, Component.literal(info.legacyMinecraft$getProfile().name())) {
+            renderableVList.renderables.add(new AbstractWidget(0, 0, 551, 20, Component.literal(info.name())) {
                 @Override
-                protected void renderWidget(GuiGraphics guiGraphics, int i, int j, float f) {
+                protected void extractWidgetRenderState(GuiGraphicsExtractor GuiGraphicsExtractor, int i, int j, float f) {
                     int y = getY() + (getHeight() - font.lineHeight) / 2 + 1;
-                    FactoryGuiGraphics.of(guiGraphics).blitSprite(isHoveredOrFocused() ? LegacySprites.LEADERBOARD_BUTTON_HIGHLIGHTED : LegacySprites.LEADERBOARD_BUTTON, getX(), getY(), getWidth(), getHeight());
+                    FactoryGuiGraphics.of(GuiGraphicsExtractor).blitSprite(isHoveredOrFocused() ? LegacySprites.LEADERBOARD_BUTTON_HIGHLIGHTED : LegacySprites.LEADERBOARD_BUTTON, getX(), getY(), getWidth(), getHeight());
                     LegacyFontUtil.applySDFont(b -> {
-                        guiGraphics.drawString(font, rank, getX() + accessor.getInteger(renderableVList.name + ".buttonRank.x", 40) - font.width(rank) / 2, y, LegacyRenderUtil.getDefaultTextColor(!isHoveredOrFocused()));
-                        guiGraphics.drawString(font, getMessage(), getX() + accessor.getInteger(renderableVList.name + ".buttonUsername.x", 120)  - (font.width(getMessage())) / 2, y, LegacyRenderUtil.getDefaultTextColor(!isHoveredOrFocused()));
+                        GuiGraphicsExtractor.text(font, rank, getX() + accessor.getInteger(renderableVList.name + ".buttonRank.x", 40) - font.width(rank) / 2, y, LegacyRenderUtil.getDefaultTextColor(!isHoveredOrFocused()));
+                        GuiGraphicsExtractor.text(font, getMessage(), getX() + accessor.getInteger(renderableVList.name + ".buttonUsername.x", 120)  - (font.width(getMessage())) / 2, y, LegacyRenderUtil.getDefaultTextColor(!isHoveredOrFocused()));
 
                         int added = 0;
                         Component hoveredValue = null;
                         for (int index = page; index < statsBoards.get(selectedStatBoard).statsList.size(); index++) {
                             if (added >= statsInScreen) break;
                             Stat<?> stat = statsBoards.get(selectedStatBoard).statsList.get(index);
-                            Component value = ControlTooltip.CONTROL_ICON_FUNCTION.apply(stat.format((Legacy4JClient.hasModOnServer() ? info.getStatsMap() : minecraft.player.getStats().stats).getInt(stat)), Style.EMPTY).getComponent();
+                            Component value = ControlTooltip.CONTROL_ICON_FUNCTION.apply(stat.format(info.statsMap().getInt(stat)), Style.EMPTY).getComponent();
                             SimpleLayoutRenderable renderable = statsBoards.get(selectedStatBoard).renderables.get(index);
                             int w = font.width(value);
-                            LegacyRenderUtil.renderScrollingString(guiGraphics, font, value, renderable.getX() + Math.max(0, renderable.getWidth() - w) / 2, getY(), renderable.getX() + Math.min(renderable.getWidth(), (renderable.getWidth() - w) / 2 + getWidth()), getY() + getHeight(), LegacyRenderUtil.getDefaultTextColor(!isHoveredOrFocused()), true);
+                            LegacyRenderUtil.renderScrollingString(GuiGraphicsExtractor, font, value, renderable.getX() + Math.max(0, renderable.getWidth() - w) / 2, getY(), renderable.getX() + Math.min(renderable.getWidth(), (renderable.getWidth() - w) / 2 + getWidth()), getY() + getHeight(), LegacyRenderUtil.getDefaultTextColor(!isHoveredOrFocused()), true);
                             if (LegacyRenderUtil.isMouseOver(i, j, renderable.getX() + Math.max(0, renderable.getWidth() - w) / 2, getY(), Math.min(renderable.getWidth(), w), getHeight()))
                                 hoveredValue = value;
                             added++;
                         }
-                        if (hoveredValue != null) guiGraphics.setTooltipForNextFrame(font, hoveredValue, i, j);
+                        if (hoveredValue != null) GuiGraphicsExtractor.setTooltipForNextFrame(font, hoveredValue, i, j);
                     });
                 }
 
@@ -194,6 +301,7 @@ public class LeaderboardsScreen extends PanelVListScreen {
     @Override
     public void tick() {
         super.tick();
+        if (localAggregateMode) return;
         if (updateTimer <= 0) {
             updateTimer = 20;
             if (Legacy4JClient.hasModOnServer()) CommonNetwork.sendToServer(PlayerInfoSync.askAll(minecraft.player));
@@ -205,7 +313,7 @@ public class LeaderboardsScreen extends PanelVListScreen {
     @Override
     protected void panelInit() {
         super.panelInit();
-        addRenderableOnly((guiGraphics, i, j, f) -> {
+        addRenderableOnly((GuiGraphicsExtractor, i, j, f) -> {
             int topTooltipHeight = accessor.getInteger("topTooltip.height", 18);
             int topTooltipY = panel.y + accessor.getInteger("topTooltip.y", -topTooltipHeight);
             int filterTooltipWidth = accessor.getInteger("filterTooltip.width", 166);
@@ -214,42 +322,42 @@ public class LeaderboardsScreen extends PanelVListScreen {
             int boardTooltipX = panel.x + accessor.getInteger("boardTooltip.x", (panel.width - boardTooltipWidth) / 2);
             int entriesTooltipWidth = accessor.getInteger("entriesTooltip.width", 166);
             int entriesTooltipX = panel.x + panel.width - entriesTooltipWidth + accessor.getInteger("entriesTooltip.x", -8);
-            LegacyRenderUtil.renderPointerPanel(guiGraphics, filterTooltipX, topTooltipY, filterTooltipWidth, topTooltipHeight);
-            LegacyRenderUtil.renderPointerPanel(guiGraphics, boardTooltipX, topTooltipY, boardTooltipWidth, topTooltipHeight);
-            LegacyRenderUtil.renderPointerPanel(guiGraphics, entriesTooltipX, topTooltipY, entriesTooltipWidth, topTooltipHeight);
+            LegacyRenderUtil.renderPointerPanel(GuiGraphicsExtractor, filterTooltipX, topTooltipY, filterTooltipWidth, topTooltipHeight);
+            LegacyRenderUtil.renderPointerPanel(GuiGraphicsExtractor, boardTooltipX, topTooltipY, boardTooltipWidth, topTooltipHeight);
+            LegacyRenderUtil.renderPointerPanel(GuiGraphicsExtractor, entriesTooltipX, topTooltipY, entriesTooltipWidth, topTooltipHeight);
             if (!statsBoards.isEmpty() && selectedStatBoard < statsBoards.size()) {
                 StatsBoard board = statsBoards.get(selectedStatBoard);
                 LegacyFontUtil.applyFontOverrideIf(LegacyOptions.getUIMode().isHD(), LegacyFontUtil.MOJANGLES_11_FONT, b -> {
                     float topTooltipScale = accessor.getFloat("topTooltip.scale", LegacyOptions.getUIMode().isFHD() ? 2 / 3f : 1.0f);
-                    guiGraphics.pose().pushMatrix();
+                    GuiGraphicsExtractor.pose().pushMatrix();
                     Component filter = Component.translatable("legacy.menu.leaderboard.filter", this.filter.get() == 0 ? OVERALL : MY_SCORE);
-                    guiGraphics.pose().translate(filterTooltipX + (filterTooltipWidth - font.width(filter) * topTooltipScale) / 2, topTooltipY + accessor.getInteger("filterText.y", 6));
-                    if (!b) guiGraphics.pose().scale(topTooltipScale);
-                    guiGraphics.drawString(font, filter, 0, 0, 0xFFFFFFFF);
-                    guiGraphics.pose().popMatrix();
-                    guiGraphics.pose().pushMatrix();
-                    guiGraphics.pose().translate(boardTooltipX + (boardTooltipWidth - font.width(board.displayName) * topTooltipScale) / 2, topTooltipY + accessor.getInteger("boardText.y", 6));
-                    if (!b) guiGraphics.pose().scale(topTooltipScale);
-                    guiGraphics.drawString(font, board.displayName, 0, 0, 0xFFFFFFFF);
-                    guiGraphics.pose().popMatrix();
-                    guiGraphics.pose().pushMatrix();
+                    GuiGraphicsExtractor.pose().translate(filterTooltipX + (filterTooltipWidth - font.width(filter) * topTooltipScale) / 2, topTooltipY + accessor.getInteger("filterText.y", 6));
+                    if (!b) GuiGraphicsExtractor.pose().scale(topTooltipScale);
+                    GuiGraphicsExtractor.text(font, filter, 0, 0, 0xFFFFFFFF);
+                    GuiGraphicsExtractor.pose().popMatrix();
+                    GuiGraphicsExtractor.pose().pushMatrix();
+                    GuiGraphicsExtractor.pose().translate(boardTooltipX + (boardTooltipWidth - font.width(board.displayName) * topTooltipScale) / 2, topTooltipY + accessor.getInteger("boardText.y", 6));
+                    if (!b) GuiGraphicsExtractor.pose().scale(topTooltipScale);
+                    GuiGraphicsExtractor.text(font, board.displayName, 0, 0, 0xFFFFFFFF);
+                    GuiGraphicsExtractor.pose().popMatrix();
+                    GuiGraphicsExtractor.pose().pushMatrix();
                     Component entries = Component.translatable("legacy.menu.leaderboard.entries", actualRankBoard.size());
-                    guiGraphics.pose().translate(entriesTooltipX + (entriesTooltipWidth - font.width(entries) * topTooltipScale) / 2, topTooltipY + accessor.getInteger("entriesText.y", 6));
-                    if (!b) guiGraphics.pose().scale(topTooltipScale);
-                    guiGraphics.drawString(font, entries, 0, 0, 0xFFFFFFFF);
-                    guiGraphics.pose().popMatrix();
+                    GuiGraphicsExtractor.pose().translate(entriesTooltipX + (entriesTooltipWidth - font.width(entries) * topTooltipScale) / 2, topTooltipY + accessor.getInteger("entriesText.y", 6));
+                    if (!b) GuiGraphicsExtractor.pose().scale(topTooltipScale);
+                    GuiGraphicsExtractor.text(font, entries, 0, 0, 0xFFFFFFFF);
+                    GuiGraphicsExtractor.pose().popMatrix();
                 });
                 if (board.statsList.isEmpty()) {
-                    guiGraphics.pose().pushMatrix();
-                    guiGraphics.pose().translate(panel.x + (panel.width - font.width(NO_RESULTS) * 1.5f) / 2f, panel.y + (panel.height - 13.5f) / 2f);
-                    guiGraphics.pose().scale(1.5f, 1.5f);
-                    guiGraphics.drawString(font, NO_RESULTS, 0, 0, CommonColor.INVENTORY_GRAY_TEXT.get(), false);
-                    guiGraphics.pose().popMatrix();
+                    GuiGraphicsExtractor.pose().pushMatrix();
+                    GuiGraphicsExtractor.pose().translate(panel.x + (panel.width - font.width(NO_RESULTS) * 1.5f) / 2f, panel.y + (panel.height - 13.5f) / 2f);
+                    GuiGraphicsExtractor.pose().scale(1.5f, 1.5f);
+                    GuiGraphicsExtractor.text(font, NO_RESULTS, 0, 0, CommonColor.GRAY_TEXT.get(), false);
+                    GuiGraphicsExtractor.pose().popMatrix();
                     return;
                 }
                 LegacyFontUtil.applySDFont(b -> {
-                    guiGraphics.drawString(font, RANK, panel.x + accessor.getInteger("rankText.x", 40), panel.y + accessor.getInteger("rankText.y", 20), CommonColor.INVENTORY_GRAY_TEXT.get(), false);
-                    guiGraphics.drawString(font, USERNAME, panel.x + accessor.getInteger("usernameText.x", 108), panel.y + accessor.getInteger("usernameText.y", 20), CommonColor.INVENTORY_GRAY_TEXT.get(), false);
+                    GuiGraphicsExtractor.text(font, RANK, panel.x + accessor.getInteger("rankText.x", 40), panel.y + accessor.getInteger("rankText.y", 20), CommonColor.GRAY_TEXT.get(), false);
+                    GuiGraphicsExtractor.text(font, USERNAME, panel.x + accessor.getInteger("usernameText.x", 108), panel.y + accessor.getInteger("usernameText.y", 20), CommonColor.GRAY_TEXT.get(), false);
                 });
 
                 int statsBoardX = accessor.getInteger("statsBoard.x", 182);
@@ -265,20 +373,20 @@ public class LeaderboardsScreen extends PanelVListScreen {
                     totalWidth = newWidth;
                 }
                 int boardControlTooltipY = topTooltipY + accessor.getInteger("boardControlTooltip.y", 6);
-                guiGraphics.pose().pushMatrix();
-                guiGraphics.pose().translate(boardTooltipX + accessor.getInteger("boardControlTooltip.x", 2), boardControlTooltipY);
+                GuiGraphicsExtractor.pose().pushMatrix();
+                GuiGraphicsExtractor.pose().translate(boardTooltipX + accessor.getInteger("boardControlTooltip.x", 2), boardControlTooltipY);
                 if (!LegacyOptions.getUIMode().isSD())
-                    guiGraphics.pose().scale(0.5f, 0.5f);
-                (ControlType.getActiveType().isKbm() ? ControlTooltip.CompoundComponentIcon.of(ControlTooltip.getKeyIcon(InputConstants.KEY_LEFT), ControlTooltip.SPACE_ICON, ControlTooltip.getKeyIcon(InputConstants.KEY_RIGHT)) : ControllerBinding.LEFT_STICK.getIcon()).render(guiGraphics, 4, 0, false);
-                guiGraphics.pose().popMatrix();
+                    GuiGraphicsExtractor.pose().scale(0.5f, 0.5f);
+                (ControlType.getActiveType().isKbm() ? ControlTooltip.CompoundComponentIcon.of(ControlTooltip.getKeyIcon(InputConstants.KEY_LEFT), ControlTooltip.SPACE_ICON, ControlTooltip.getKeyIcon(InputConstants.KEY_RIGHT)) : ControllerBinding.LEFT_STICK.getIcon()).render(GuiGraphicsExtractor, 4, 0, false);
+                GuiGraphicsExtractor.pose().popMatrix();
                 if (statsInScreen < statsBoards.get(selectedStatBoard).renderables.size()) {
                     ControlTooltip.Icon pageControl = ControlTooltip.CompoundComponentIcon.of(ControlType.getActiveType().isKbm() ? ControlTooltip.getKeyIcon(InputConstants.KEY_LBRACKET) : ControllerBinding.LEFT_BUMPER.getIcon(), ControlTooltip.SPACE_ICON, ControlType.getActiveType().isKbm() ? ControlTooltip.getKeyIcon(InputConstants.KEY_RBRACKET) : ControllerBinding.RIGHT_BUMPER.getIcon());
-                    guiGraphics.pose().pushMatrix();
-                    guiGraphics.pose().translate(boardTooltipX + boardTooltipWidth + accessor.getInteger("boardPageTooltip.x", -4), boardControlTooltipY);
+                    GuiGraphicsExtractor.pose().pushMatrix();
+                    GuiGraphicsExtractor.pose().translate(boardTooltipX + boardTooltipWidth + accessor.getInteger("boardPageTooltip.x", -4), boardControlTooltipY);
                     if (!LegacyOptions.getUIMode().isSD())
-                        guiGraphics.pose().scale(0.5f, 0.5f);
-                    pageControl.render(guiGraphics, -pageControl.getWidth(), 0, false);
-                    guiGraphics.pose().popMatrix();
+                        GuiGraphicsExtractor.pose().scale(0.5f, 0.5f);
+                    pageControl.render(GuiGraphicsExtractor, -pageControl.getWidth(), 0, false);
+                    GuiGraphicsExtractor.pose().popMatrix();
                 }
                 if (statsInScreen == 0) return;
                 int x = (totalStatsWidth - totalWidth) / (statsInScreen + 1);
@@ -286,28 +394,34 @@ public class LeaderboardsScreen extends PanelVListScreen {
                 for (int index = page; index < page + statsInScreen; index++) {
                     SimpleLayoutRenderable r = board.renderables.get(index);
                     r.setPosition(panel.x + statsBoardX + x, panel.y + statsBoardY - r.height / 2);
-                    r.render(guiGraphics, i, j, f);
+                    r.extractRenderState(GuiGraphicsExtractor, i, j, f);
                     if (r.isHovered(i, j)) hovered = index;
                     x += r.getWidth() + (totalStatsWidth - totalWidth) / statsInScreen;
                 }
                 if (hovered != null)
-                    guiGraphics.setTooltipForNextFrame(font, board.statsList.get(hovered).getValue() instanceof EntityType<?> e ? e.getDescription() : board.statsList.get(hovered).getValue() instanceof ItemLike item && item.asItem() != Items.AIR ? Component.translatable(item.asItem().getDescriptionId()) : ControlTooltip.getAction("stat." + board.statsList.get(hovered).getValue().toString().replace(':', '.')), i, j);
+                    GuiGraphicsExtractor.setTooltipForNextFrame(font, board.statsList.get(hovered).getValue() instanceof EntityType<?> e ? e.getDescription() : board.statsList.get(hovered).getValue() instanceof ItemLike item && item.asItem() != Items.AIR ? Component.translatable(item.asItem().getDescriptionId()) : ControlTooltip.getAction("stat." + board.statsList.get(hovered).getValue().toString().replace(':', '.')), i, j);
             }
         });
     }
 
     @Override
+    public void initRenderableVListEntry(RenderableVList renderableVList, Renderable renderable) {
+        if (renderable instanceof AbstractWidget widget)
+            widget.setHeight(accessor.getInteger("buttonsHeight", 20));
+    }
+
+    @Override
     public void renderableVListInit() {
-        initRenderableVListHeight(20);
         getRenderableVList().init(panel.x + 9, panel.y + 39, panel.width - 17, panel.height - 49);
     }
 
     @Override
-    public void renderDefaultBackground(GuiGraphics guiGraphics, int i, int j, float f) {
-        LegacyRenderUtil.renderDefaultBackground(accessor, guiGraphics, false);
+    public void renderDefaultBackground(GuiGraphicsExtractor GuiGraphicsExtractor, int i, int j, float f) {
+        LegacyRenderUtil.renderDefaultBackground(accessor, GuiGraphicsExtractor, false);
     }
 
     public void onStatsUpdated() {
+        if (localAggregateMode) return;
         if (!Legacy4JClient.hasModOnServer()) {
             refreshStatsBoards(minecraft);
             if (LeaderboardsScreen.statsBoards.get(selectedStatBoard).statsList.isEmpty())
@@ -357,7 +471,7 @@ public class LeaderboardsScreen extends PanelVListScreen {
                 h.itemIcon = i.asItem().getDefaultInstance();
                 return h;
             } else if (stat.getValue() instanceof EntityType<?> e) {
-                ResourceLocation entityIcon = Legacy4J.createModLocation("icon/leaderboards/entity/" + e.builtInRegistryHolder().key().location().getPath());
+                Identifier entityIcon = Legacy4J.createModLocation("icon/leaderboards/entity/" + e.builtInRegistryHolder().key().identifier().getPath());
                 if (FactoryGuiGraphics.getSprites().texturesByName.containsKey(entityIcon)) {
                     LegacyIconHolder h = new LegacyIconHolder(24, 24);
                     h.iconSprite = entityIcon;
@@ -366,13 +480,13 @@ public class LeaderboardsScreen extends PanelVListScreen {
                 return LegacyIconHolder.entityHolder(0, 0, 24, 24, e);
             }
             Component name = Component.translatable("stat." + stat.getValue().toString().replace(':', '.'));
-            return SimpleLayoutRenderable.create(Minecraft.getInstance().font.width(name) * 2 / 3 + 8, 7, (l) -> ((guiGraphics, i, j, f) ->
+            return SimpleLayoutRenderable.create(Minecraft.getInstance().font.width(name) * 2 / 3 + 8, 7, (l) -> ((GuiGraphicsExtractor, i, j, f) ->
                     LegacyFontUtil.applySmallerFont(LegacyFontUtil.MOJANGLES_11_FONT, b -> {
-                        guiGraphics.pose().pushMatrix();
-                        guiGraphics.pose().translate(l.getX() + 4, l.getY());
-                        if (!b) guiGraphics.pose().scale(2 / 3f, 2 / 3f);
-                        guiGraphics.drawString(Minecraft.getInstance().font, name, 0, 0, CommonColor.INVENTORY_GRAY_TEXT.get(), false);
-                        guiGraphics.pose().popMatrix();
+                        GuiGraphicsExtractor.pose().pushMatrix();
+                        GuiGraphicsExtractor.pose().translate(l.getX() + 4, l.getY());
+                        if (!b) GuiGraphicsExtractor.pose().scale(2 / 3f, 2 / 3f);
+                        GuiGraphicsExtractor.text(Minecraft.getInstance().font, name, 0, 0, CommonColor.GRAY_TEXT.get(), false);
+                        GuiGraphicsExtractor.pose().popMatrix();
                     })));
 
         }
@@ -423,7 +537,7 @@ public class LeaderboardsScreen extends PanelVListScreen {
         }
 
         protected StatsBoard statsBoardFromJson(JsonObject o) {
-            var statType = FactoryAPIPlatform.getRegistryValue(ResourceLocation.tryParse(GsonHelper.getAsString(o, "type")), BuiltInRegistries.STAT_TYPE);
+            var statType = FactoryAPIPlatform.getRegistryValue(Identifier.tryParse(GsonHelper.getAsString(o, "type")), BuiltInRegistries.STAT_TYPE);
             Component name = o.has("displayName") ? Component.translatable(GsonHelper.getAsString(o, "displayName")) : statType.getDisplayName();
             StatsBoard statsBoard;
             if (o.get("predicate") instanceof JsonObject predObj) {
@@ -441,17 +555,22 @@ public class LeaderboardsScreen extends PanelVListScreen {
                 var predicate = IOUtil.registryMatches(statType.getRegistry(), override.getAsJsonObject("predicate"));
                 switch (type) {
                     case "item" -> {
-                        Item item = FactoryAPIPlatform.getRegistryValue(ResourceLocation.tryParse(GsonHelper.getAsString(override, "id")), BuiltInRegistries.ITEM);
-                        LegacyIconHolder h = new LegacyIconHolder(24, 24);
-                        h.itemIcon = item.getDefaultInstance();
+                        Item item = FactoryAPIPlatform.getRegistryValue(Identifier.tryParse(GsonHelper.getAsString(override, "id")), BuiltInRegistries.ITEM);
+                        LegacyIconHolder h = new LegacyIconHolder(24, 24) {
+                            @Override
+                            public void extractRenderState(GuiGraphicsExtractor graphics, int i, int j, float f) {
+                                if (itemIcon.isEmpty()) itemIcon = item.getDefaultInstance();
+                                super.extractRenderState(graphics, i, j, f);
+                            }
+                        };
                         statsBoard.statIconOverrides.add(new StatIconOverride<>(statType, predicate, h));
                     }
                     case "entity_type" -> {
-                        EntityType<?> entityType = FactoryAPIPlatform.getRegistryValue(ResourceLocation.tryParse(GsonHelper.getAsString(override, "id")), BuiltInRegistries.ENTITY_TYPE);
+                        EntityType<?> entityType = FactoryAPIPlatform.getRegistryValue(Identifier.tryParse(GsonHelper.getAsString(override, "id")), BuiltInRegistries.ENTITY_TYPE);
                         statsBoard.statIconOverrides.add(new StatIconOverride<>(statType, predicate, LegacyIconHolder.entityHolder(0, 0, 24, 24, entityType)));
                     }
                     case "sprite" -> {
-                        ResourceLocation sprite = ResourceLocation.tryParse(GsonHelper.getAsString(override, "id"));
+                        Identifier sprite = Identifier.tryParse(GsonHelper.getAsString(override, "id"));
                         LegacyIconHolder h = new LegacyIconHolder(24, 24);
                         h.iconSprite = sprite;
                         statsBoard.statIconOverrides.add(new StatIconOverride<>(statType, predicate, h));
@@ -464,6 +583,9 @@ public class LeaderboardsScreen extends PanelVListScreen {
         public String getName() {
             return "legacy:leaderboards_listing";
         }
+    }
+
+    public record LeaderboardEntry(String name, Object2IntMap<Stat<?>> statsMap) {
     }
 
 }

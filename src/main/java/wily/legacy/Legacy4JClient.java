@@ -4,10 +4,9 @@ import com.mojang.blaze3d.platform.InputConstants;
 import com.mojang.blaze3d.vertex.*;
 import com.mojang.serialization.DataResult;
 import net.minecraft.SharedConstants;
-import net.minecraft.client.GraphicsStatus;
 import net.minecraft.client.KeyMapping;
 import net.minecraft.client.Minecraft;
-import net.minecraft.client.color.block.BlockColor;
+import net.minecraft.client.color.block.BlockTintSource;
 import net.minecraft.client.gui.ComponentPath;
 import net.minecraft.client.gui.components.Button;
 import net.minecraft.client.gui.navigation.FocusNavigationEvent;
@@ -21,9 +20,11 @@ import net.minecraft.client.renderer.*;
 //? if <1.21.5 {
 /*import net.minecraft.client.resources.model.BakedModel;
  *///?} else {
-import net.minecraft.client.renderer.block.model.BlockStateModel;
+import net.minecraft.client.renderer.block.dispatch.BlockStateModel;
 //?}
 import net.minecraft.client.renderer.chunk.ChunkSectionLayer;
+import net.minecraft.client.renderer.rendertype.RenderType;
+import net.minecraft.client.renderer.rendertype.RenderTypes;
 import net.minecraft.core.*;
 import net.minecraft.world.InteractionHand;
 import net.minecraft.world.entity.raid.Raid;
@@ -33,6 +34,7 @@ import net.minecraft.world.level.block.*;
 import net.minecraft.world.level.block.entity.BlockEntity;
 //? if >=1.21.2 {
 import net.minecraft.client.renderer.entity.state.*;
+import net.minecraft.world.level.gamerules.GameRules;
 import wily.factoryapi.base.Stocker;
 import wily.factoryapi.base.client.*;
 //?}
@@ -43,13 +45,24 @@ import net.minecraft.core.registries.BuiltInRegistries;
 import net.minecraft.core.registries.Registries;
 import net.minecraft.network.chat.CommonComponents;
 import net.minecraft.network.chat.Component;
+import net.minecraft.network.chat.contents.TranslatableContents;
 import net.minecraft.resources.ResourceKey;
-import net.minecraft.resources.ResourceLocation;
+import net.minecraft.resources.Identifier;
 import net.minecraft.server.level.ServerPlayer;
+//? if neoforge && >=26.1 {
+/*import net.minecraft.server.packs.PackLocationInfo;
+import net.minecraft.server.packs.PackSelectionConfig;
+import net.minecraft.server.packs.repository.KnownPack;
+import net.minecraft.server.packs.repository.PackSource;
+import net.neoforged.fml.ModList;
+import net.neoforged.neoforge.event.AddPackFindersEvent;
+import net.neoforged.neoforge.resource.JarContentsPackResources;
+*///?}
 import net.minecraft.server.packs.PackType;
 import net.minecraft.server.packs.repository.Pack;
 import net.minecraft.world.entity.Entity;
 import net.minecraft.world.entity.EntityType;
+import net.minecraft.world.entity.player.Player;
 import net.minecraft.world.item.BlockItem;
 //? if >=1.20.5 {
 import net.minecraft.world.item.alchemy.PotionContents;
@@ -92,12 +105,13 @@ import wily.factoryapi.util.FactoryScreenUtil;
 import wily.legacy.block.entity.WaterCauldronBlockEntity;
 import wily.legacy.client.*;
 import wily.legacy.client.screen.*;
-//? if fabric || >=1.21 && neoforge {
+//? if fabric || (>=1.21 && neoforge) {
 import wily.legacy.client.screen.compat.IrisCompat;
 import wily.legacy.client.screen.compat.SodiumCompat;
 //?}
 import wily.legacy.config.LegacyCommonOptions;
 import wily.legacy.entity.LegacyLocalPlayer;
+import wily.legacy.init.LegacyGameRules;
 import wily.legacy.init.LegacyRegistries;
 import wily.legacy.init.LegacyUIElementTypes;
 import wily.legacy.inventory.LegacyPistonMovingBlockEntity;
@@ -106,6 +120,7 @@ import wily.legacy.entity.LegacyPlayerInfo;
 import wily.legacy.network.TopMessage;
 import wily.legacy.util.client.LegacyGuiElements;
 import wily.legacy.util.client.MCAccount;
+import wily.legacy.skins.SkinsClientBootstrap;
 
 
 import java.io.File;
@@ -125,6 +140,7 @@ public class Legacy4JClient {
     public static final MapIdValueManager<LegacyCraftingTabListing, ?> legacyCraftingListingManager = MapIdValueManager.create(Legacy4J.createModLocation("crafting_tab_listing"), LegacyCraftingTabListing.CODEC);
     public static final MapIdValueManager<LegacyBiomeOverride, ?> legacyBiomeOverrides = MapIdValueManager.createWithListCodec(Legacy4J.createModLocation("biome_overrides"), LegacyBiomeOverride.LIST_MAP_CODEC);
     public static final LegacyWorldTemplate.Manager legacyWorldTemplateManager = new LegacyWorldTemplate.Manager();
+    public static final ContentManager.CategoryManager categoryManager = new ContentManager.CategoryManager();
     public static final LegacyTipOverride.Manager legacyTipOverridesManager = new LegacyTipOverride.Manager();
     public static final LegacyResourceManager legacyResourceManager = new LegacyResourceManager();
     public static final StoneCuttingGroupManager stoneCuttingGroupManager = new StoneCuttingGroupManager();
@@ -134,13 +150,13 @@ public class Legacy4JClient {
     public static final ControlTooltip.GuiManager controlTooltipGuiManager = new ControlTooltip.GuiManager();
     public static final LeaderboardsScreen.Manager leaderBoardListingManager = new LeaderboardsScreen.Manager();
     public static final HowToPlayScreen.Manager howToPlaySectionManager = new HowToPlayScreen.Manager();
-    public static final MapIdValueManager<OptionsPreset, ListMap<ResourceLocation, OptionsPreset>> optionPresetsManager = MapIdValueManager.createListMap(Legacy4J.createModLocation("option_presets"), OptionsPreset.CODEC);
-    public static final MapIdValueManager<ControlType, ListMap<ResourceLocation, ControlType>> controlTypesManager = MapIdValueManager.createListMap(Legacy4J.createModLocation("control_types"), ControlType.CODEC);
+    public static final MapIdValueManager<OptionsPreset, ListMap<Identifier, OptionsPreset>> optionPresetsManager = MapIdValueManager.createListMap(Legacy4J.createModLocation("option_presets"), OptionsPreset.CODEC);
+    public static final MapIdValueManager<ControlType, ListMap<Identifier, ControlType>> controlTypesManager = MapIdValueManager.createListMap(Legacy4J.createModLocation("control_types"), ControlType.CODEC);
     public static final ControllerManager controllerManager = new ControllerManager();
-    public static final Map<Block, ResourceLocation> fastLeavesModels = new HashMap<>();
+    public static final Map<Block, Identifier> fastLeavesModels = new HashMap<>();
     public static final FactoryConfig.StorageHandler MIXIN_CONFIGS_STORAGE = FactoryConfig.StorageHandler.fromMixin(LegacyMixinOptions.CLIENT_MIXIN_STORAGE, false);
-    public static final RenderType GHAST_SHOOTING_GLOW = RenderType.eyes(FactoryAPI.createVanillaLocation("textures/entity/ghast/ghast_shooting_glow.png"));
-    public static final RenderType DROWNED_GLOW = RenderType.eyes(FactoryAPI.createVanillaLocation("textures/entity/zombie/drowned_glow.png"));
+    public static final RenderType GHAST_SHOOTING_GLOW = RenderTypes.eyes(FactoryAPI.createVanillaLocation("textures/entity/ghast/ghast_shooting_glow.png"));
+    public static final RenderType DROWNED_GLOW = RenderTypes.eyes(FactoryAPI.createVanillaLocation("textures/entity/zombie/drowned_glow.png"));
     public static final Map<Optional<ResourceKey<WorldPreset>>, PresetEditor> VANILLA_PRESET_EDITORS = new HashMap<>(Map.of(Optional.of(WorldPresets.FLAT), (createWorldScreen, settings) -> {
         ChunkGenerator chunkGenerator = settings.selectedDimensions().overworld();
         RegistryAccess.Frozen registryAccess = settings.worldgenLoadContext();
@@ -153,14 +169,15 @@ public class Legacy4JClient {
     public static final KeyMapping keyCycleHeldLeft = new KeyMapping("legacy.key.cycleHeldLeft", InputConstants.KEY_PAGEDOWN, KeyMapping.Category.INVENTORY);
     public static final KeyMapping keyCycleHeldRight = new KeyMapping("legacy.key.cycleHeldRight", InputConstants.KEY_PAGEUP, KeyMapping.Category.INVENTORY);
     public static final KeyMapping keyToggleCursor = new KeyMapping("legacy.key.toggleCursor", -1, KeyMapping.Category.MISC);
-    public static KeyMapping keyHostOptions = new KeyMapping(MOD_ID + ".key.host_options", InputConstants.KEY_H, KeyMapping.Category.MISC);
-    public static KeyMapping keyLegacy4JSettings = new KeyMapping(MOD_ID + ".key.legacy4JSettings", InputConstants.KEY_Y, KeyMapping.Category.MISC);
-    public static KeyMapping keyFlyUp = new KeyMapping(MOD_ID + ".key.flyUp", InputConstants.KEY_UP, KeyMapping.Category.MOVEMENT);
-    public static KeyMapping keyFlyDown = new KeyMapping(MOD_ID + ".key.flyDown", InputConstants.KEY_DOWN, KeyMapping.Category.MOVEMENT);
-    public static KeyMapping keyFlyLeft = new KeyMapping(MOD_ID + ".key.flyLeft", InputConstants.KEY_LEFT, KeyMapping.Category.MOVEMENT);
-    public static KeyMapping keyFlyRight = new KeyMapping(MOD_ID + ".key.flyRight", InputConstants.KEY_RIGHT, KeyMapping.Category.MOVEMENT);
+    public static final KeyMapping keyHostOptions = new KeyMapping(MOD_ID + ".key.host_options", InputConstants.KEY_H, KeyMapping.Category.MISC);
+    public static final KeyMapping keyLegacy4JSettings = new KeyMapping(MOD_ID + ".key.legacy4JSettings", InputConstants.KEY_Y, KeyMapping.Category.MISC);
+    public static final KeyMapping keyFlyUp = new KeyMapping(MOD_ID + ".key.flyUp", InputConstants.KEY_UP, KeyMapping.Category.MOVEMENT);
+    public static final KeyMapping keyFlyDown = new KeyMapping(MOD_ID + ".key.flyDown", InputConstants.KEY_DOWN, KeyMapping.Category.MOVEMENT);
+    public static final KeyMapping keyFlyLeft = new KeyMapping(MOD_ID + ".key.flyLeft", InputConstants.KEY_LEFT, KeyMapping.Category.MOVEMENT);
+    public static final KeyMapping keyFlyRight = new KeyMapping(MOD_ID + ".key.flyRight", InputConstants.KEY_RIGHT, KeyMapping.Category.MOVEMENT);
     public static boolean isNewerVersion = false;
     public static boolean isNewerMinecraftVersion = false;
+    private static boolean hideNextExperimentalWorldWarning;
     public static ControlType lastControlType;
     public static boolean canSprint = false;
     public static int sprintTicksLeft = -1;
@@ -201,6 +218,15 @@ public class Legacy4JClient {
         }
     }
 
+    public static boolean isHostInvisible(Player player) {
+        return player != null && isHostInvisible(player.getUUID());
+    }
+
+    public static boolean isHostInvisible(UUID playerId) {
+        Minecraft minecraft = Minecraft.getInstance();
+        return minecraft.getConnection() != null && minecraft.getConnection().getPlayerInfo(playerId) instanceof LegacyPlayerInfo info && !info.isVisible();
+    }
+
     public static boolean playerHasInfiniteMaterials() {
         return Minecraft.getInstance().player.hasInfiniteMaterials();
     }
@@ -222,6 +248,12 @@ public class Legacy4JClient {
                 }
             };
         } else if (screen instanceof BackupConfirmScreen s) {
+            if ((LegacyOptions.hideExperimentalWorldWarning.get() || hideNextExperimentalWorldWarning) && isExperimentalWorldWarning(s.getTitle(), BackupConfirmScreenAccessor.of(s).getDescription())) {
+                hideNextExperimentalWorldWarning = false;
+                Minecraft minecraft = Minecraft.getInstance();
+                minecraft.execute(() -> BackupConfirmScreenAccessor.of(s).proceed(false, false));
+                return minecraft.screen;
+            }
             return new ConfirmationScreen(Minecraft.getInstance().screen, ConfirmationScreen::getPanelWidth, () -> (LegacyOptions.getUIMode().isSD() ? 94 : 141) + (BackupConfirmScreenAccessor.of(s).hasCacheErase() ? LegacyOptions.getUIMode().isSD() ? 11 : 14 : 0), s.getTitle(), BackupConfirmScreenAccessor.of(s).getDescription(), LegacyScreen::onClose) {
                 boolean eraseCache = false;
 
@@ -242,6 +274,29 @@ public class Legacy4JClient {
         return screen;
     }
 
+    private static boolean isExperimentalWorldWarning(Component... components) {
+        for (Component component : components) {
+            if (component == null) continue;
+            if (component.getContents() instanceof TranslatableContents contents) {
+                String key = contents.getKey().toLowerCase(Locale.ROOT);
+                if (key.contains("experimental") || key.contains("datapack") || key.contains("data_pack") || key.contains("dataPack")) return true;
+            }
+            String text = component.getString().toLowerCase(Locale.ROOT);
+            if (text.contains("experimental") || text.contains("data pack")) return true;
+        }
+        return false;
+    }
+
+    public static void hideNextExperimentalWorldWarning(Runnable runnable) {
+        boolean previous = hideNextExperimentalWorldWarning;
+        hideNextExperimentalWorldWarning = true;
+        try {
+            runnable.run();
+        } finally {
+            hideNextExperimentalWorldWarning = previous;
+        }
+    }
+
     public static void preTick(Minecraft minecraft) {
         if (minecraft.isGameLoadFinished()) {
             ControlType activeControlType = ControlType.getActiveType();
@@ -254,21 +309,25 @@ public class Legacy4JClient {
 
         if (minecraft.screen instanceof ReplaceableScreen r && r.canReplace()) minecraft.setScreen(r.getReplacement());
 
-        if (LegacyOptions.unfocusedInputs.get()) minecraft.setWindowActive(true);
         while (keyCrafting.consumeClick()) {
             if (minecraft.player != null && (minecraft.player.isCreative() || minecraft.player.isSpectator())) {
                 if (minecraft.player.isSpectator()) minecraft.gui.getSpectatorGui().onHotbarActionKeyPressed();
                 else minecraft.setScreen(CreativeModeScreen.getActualCreativeScreenInstance(minecraft));
                 continue;
             }
-            if (minecraft.hitResult instanceof BlockHitResult r && minecraft.level.getBlockState(r.getBlockPos()).getBlock() instanceof CraftingTableBlock && controllerManager.isControllerTheLastInput()) {
+            if (minecraft.hitResult instanceof BlockHitResult r && minecraft.level.getBlockState(r.getBlockPos()).getBlock() instanceof CraftingTableBlock) {
                 minecraft.gameMode.useItemOn(minecraft.player, InteractionHand.MAIN_HAND, r);
             } else if (LegacyOptions.hasClassicCrafting()) {
                 minecraft.getTutorial().onOpenInventory();
                 minecraft.setScreen(new InventoryScreen(minecraft.player));
             } else if (LegacyOptions.hasMixedCrafting()) {
                 minecraft.setScreen(MixedCraftingScreen.playerCraftingScreen(minecraft.player));
-            } else CommonNetwork.sendToServer(ServerOpenClientMenuPayload.playerCrafting());
+            } else if (hasModOnServer()) {
+                CommonNetwork.sendToServer(ServerOpenClientMenuPayload.playerCrafting());
+            } else {
+                minecraft.getTutorial().onOpenInventory();
+                minecraft.setScreen(new InventoryScreen(minecraft.player));
+            }
         }
         while (keyHostOptions.consumeClick()) {
             minecraft.setScreen(new HostOptionsScreen());
@@ -330,6 +389,7 @@ public class Legacy4JClient {
                     knownEntities.add(r.getEntity().getType());
             }
         }
+        SkinsClientBootstrap.postTick(minecraft);
     }
 
     public static void postScreenInit(Screen screen) {
@@ -363,6 +423,14 @@ public class Legacy4JClient {
     }
 
     public static void init() {
+        SkinsClientBootstrap.init();
+        LegacyGameRules.setClientRuleResolver(key -> {
+            if (key == LegacyGameRules.LEGACY_FLIGHT.get() && LegacyOptions.forceLegacyFlight.get()) return true;
+            if (key == LegacyGameRules.LEGACY_SWIMMING.get() && LegacyOptions.forceLegacySwimming.get()) return true;
+            if (key == LegacyGameRules.LEGACY_SHIELD_CONTROLS.get() && LegacyOptions.forceLegacyShieldControls.get()) return true;
+            if (key == LegacyGameRules.LEGACY_OFFHAND_LIMITS.get() && LegacyOptions.forceLegacyOffhandLimits.get()) return true;
+            return hasModOnServer() && gameRules != null && gameRules.get(key);
+        });
         ControlType.UpdateEvent.EVENT.register((last, actual) -> {
             UIAccessor uiAccessor = Minecraft.getInstance().screen == null ? FactoryScreenUtil.getGuiAccessor() : FactoryScreenUtil.getScreenAccessor();
             uiAccessor.reloadUI();
@@ -388,6 +456,7 @@ public class Legacy4JClient {
         FactoryEvent.registerReloadListener(PackType.CLIENT_RESOURCES, legacyCreativeListingManager);
         FactoryEvent.registerReloadListener(PackType.CLIENT_RESOURCES, legacyCraftingListingManager);
         FactoryEvent.registerReloadListener(PackType.CLIENT_RESOURCES, legacyWorldTemplateManager);
+        FactoryEvent.registerReloadListener(PackType.CLIENT_RESOURCES, categoryManager);
         FactoryEvent.registerReloadListener(PackType.CLIENT_RESOURCES, legacyTipOverridesManager);
         FactoryEvent.registerReloadListener(PackType.CLIENT_RESOURCES, legacyBiomeOverrides);
         FactoryEvent.registerReloadListener(PackType.CLIENT_RESOURCES, optionPresetsManager);
@@ -410,36 +479,64 @@ public class Legacy4JClient {
             LegacySaveCache.setup(m);
             ControllerBinding.setupDefaultBindings(m);
             LegacyOptions.CLIENT_STORAGE.load();
-            FactoryAPIClient.registerRenderType(ChunkSectionLayer.CUTOUT_MIPPED, SHRUB.get());
-            FactoryAPIClient.registerRenderType(ChunkSectionLayer.TRANSLUCENT, Blocks.WATER);
             //? if fabric
             if (FactoryAPI.isModLoaded("modmenu")) ModMenuCompat.init();
-            //? if fabric || >=1.21 && neoforge {
+            //? if fabric || (>=1.21 && neoforge) {
             if (FactoryAPI.isModLoaded("sodium")) SodiumCompat.init();
             if (FactoryAPI.isModLoaded("iris")) IrisCompat.init();
             //?}
             LegacyGuiElements.setup(m);
+
+            HelpAndOptionsScreen.CHANGE_SKIN = new ScreenSection<>() {
+                @Override
+                public net.minecraft.network.chat.Component title() {
+                    return HelpAndOptionsScreen.CHANGE_SKIN_OPTIONS.title();
+                }
+
+                @Override
+                public Screen build(Screen parent) {
+                    return SkinsClientBootstrap.createChangeSkinScreen(parent);
+                }
+            };
         });
 
         FactoryAPIClient.registerBlockColor(registry -> {
-            registry.accept((blockState, blockAndTintGetter, blockPos, i) -> blockAndTintGetter == null || blockPos == null ? GrassColor.getDefaultColor() : BiomeColors.getAverageGrassColor(blockAndTintGetter, blockPos), SHRUB.get());
-            BlockColor blockColor = (blockState, blockAndTintGetter, blockPos, i) -> {
-                if (blockAndTintGetter != null && blockPos != null) {
-                    BlockEntity blockEntity = blockAndTintGetter.getBlockEntity(blockPos);
-                    if (blockEntity instanceof LegacyPistonMovingBlockEntity e && e.getRenderingBlockEntity() != null && LegacyOptions.enhancedPistonMovingRenderer.get()) {
-                        blockEntity = e.getRenderingBlockEntity();
-                    }
-                    if (blockEntity instanceof WaterCauldronBlockEntity be) {
-                        if (!be.hasWater())
-                            return /*? if <1.20.5 {*//*PotionUtils.getColor*//*?} else if <1.21.4 {*//*PotionContents.getColor*//*?} else {*/PotionContents.getColorOptional/*?}*/(be.potion.value().getEffects())/*? if >=1.21.4 {*/.orElse(-13083194)/*?}*/;
-                        else if (be.waterColor != null) return be.waterColor;
-                    }
-                    return BiomeColors.getAverageWaterColor(blockAndTintGetter, blockPos);
+            registry.accept(List.of(new BlockTintSource() {
+                @Override
+                public int color(BlockState blockState) {
+                    return GrassColor.getDefaultColor();
                 }
-                return -1;
+
+                @Override
+                public int colorInWorld(BlockState blockState, net.minecraft.client.renderer.block.BlockAndTintGetter blockAndTintGetter, BlockPos blockPos) {
+                    return blockAndTintGetter == null || blockPos == null ? GrassColor.getDefaultColor() : BiomeColors.getAverageGrassColor(blockAndTintGetter, blockPos);
+                }
+            }), SHRUB.get());
+            BlockTintSource blockColor = new BlockTintSource() {
+                @Override
+                public int color(BlockState blockState) {
+                    return -1;
+                }
+
+                @Override
+                public int colorInWorld(BlockState blockState, net.minecraft.client.renderer.block.BlockAndTintGetter blockAndTintGetter, BlockPos blockPos) {
+                    if (blockAndTintGetter != null && blockPos != null) {
+                        BlockEntity blockEntity = blockAndTintGetter.getBlockEntity(blockPos);
+                        if (blockEntity instanceof LegacyPistonMovingBlockEntity e && e.getRenderingBlockEntity() != null && LegacyOptions.enhancedPistonMovingRenderer.get()) {
+                            blockEntity = e.getRenderingBlockEntity();
+                        }
+                        if (blockEntity instanceof WaterCauldronBlockEntity be) {
+                            if (!be.hasWater())
+                                return /*? if <1.20.5 {*//*PotionUtils.getColor*//*?} else if <1.21.4 {*//*PotionContents.getColor*//*?} else {*/PotionContents.getColorOptional/*?}*/(be.potion.value().getEffects())/*? if >=1.21.4 {*/.orElse(-13083194)/*?}*/;
+                            else if (be.waterColor != null) return be.waterColor;
+                        }
+                        return BiomeColors.getAverageWaterColor(blockAndTintGetter, blockPos);
+                    }
+                    return -1;
+                }
             };
-            registry.accept(blockColor, Blocks.WATER_CAULDRON);
-            registry.accept(blockColor, LegacyRegistries.COLORED_WATER_CAULDRON.get());
+            registry.accept(List.of(blockColor), Blocks.WATER_CAULDRON);
+            registry.accept(List.of(blockColor), LegacyRegistries.COLORED_WATER_CAULDRON.get());
         });
         fastLeavesModels.put(Blocks.OAK_LEAVES, FactoryAPI.createVanillaLocation("fast_oak_leaves"));
         fastLeavesModels.put(Blocks.SPRUCE_LEAVES, FactoryAPI.createVanillaLocation("fast_spruce_leaves"));
@@ -477,15 +574,7 @@ public class Legacy4JClient {
             knownBlocks.save();
             knownEntities.save();
         });
-        FactoryEvent.registerBuiltInPacks(registry -> {
-            registry.registerResourcePack(FactoryAPI.createLocation(MOD_ID, "legacy_resources"), true);
-            registry.registerResourcePack(FactoryAPI.createLocation(MOD_ID, "legacy_waters"), true);
-            registry.registerResourcePack(FactoryAPI.createLocation(MOD_ID, "console_aspects"), false);
-            if (FactoryAPI.getLoader().isForgeLike()) {
-                registry.register("programmer_art", FactoryAPI.createLocation(MOD_ID, "programmer_art"), Component.translatable("legacy.builtin.console_programmer"), Pack.Position.TOP, false);
-                registry.register("high_contrast", FactoryAPI.createLocation(MOD_ID, "high_contrast"), Component.translatable("legacy.builtin.high_contrast"), Pack.Position.TOP, false);
-            }
-        });
+        registerBuiltInPacks();
         LegacyUIElementTypes.init();
         FactoryRenderStateExtension.types.add(new FactoryRenderStateExtension.Type<>(ThrownTridentRenderState.class, LoyaltyLinesRenderState::new));
         FactoryRenderStateExtension.types.add(new FactoryRenderStateExtension.Type<>(FireworkRocketRenderState.class, LegacyFireworkRenderState::new));
@@ -528,7 +617,20 @@ public class Legacy4JClient {
             TopMessage.setMedium(null);
         });
         FactoryAPIClient.registerConfigScreen(FactoryAPIPlatform.getModInfo(MOD_ID), Legacy4JSettingsScreen::new);
-        FactoryAPIClient.registerDefaultConfigScreen("minecraft", s -> new OptionsScreen(s, Minecraft.getInstance().options));
+        FactoryAPIClient.registerDefaultConfigScreen("minecraft", s -> new OptionsScreen(s, Minecraft.getInstance().options, false));
+    }
+
+    private static void registerBuiltInPacks() {
+        FactoryEvent.registerBuiltInPacks(registry -> {
+            registry.registerResourcePack(Legacy4J.createModLocation("legacy_resources"), true);
+            registry.registerResourcePack(Legacy4J.createModLocation("legacy_waters"), true);
+            registry.registerResourcePack(Legacy4J.createModLocation("console_aspects"), false);
+            registry.registerResourcePack(Legacy4J.createModLocation("rosenfeld_patch"), false);
+            if (FactoryAPI.getLoader().isForgeLike()) {
+                registry.register("programmer_art", Legacy4J.createModLocation("programmer_art"), Component.translatable("legacy.builtin.console_programmer"), Pack.Position.TOP, false);
+                registry.register("high_contrast", Legacy4J.createModLocation("high_contrast"), Component.translatable("legacy.builtin.high_contrast"), Pack.Position.TOP, false);
+            }
+        });
     }
 
     public static void updateChunks() {
@@ -553,7 +655,7 @@ public class Legacy4JClient {
     }
 
     public static BlockStateModel getFastLeavesModelReplacement(BlockGetter blockGetter, BlockPos pos, BlockState blockState, /*? if <1.21.5 {*//*BakedModel*//*?} else {*/BlockStateModel/*?}*/ model) {
-        boolean fastGraphics = Minecraft.getInstance().options.graphicsMode().get() == GraphicsStatus.FAST;
+        boolean fastGraphics = !Minecraft.getInstance().options.cutoutLeaves().get();
         if (LegacyOptions.fastLeavesCustomModels.get() && blockState.getBlock() instanceof LeavesBlock && fastLeavesModels.containsKey(blockState.getBlock()) && (fastGraphics || LegacyOptions.fastLeavesWhenBlocked.get())) {
             if (!fastGraphics && blockGetter != null) {
                 for (Direction value : Direction.values()) {
@@ -582,7 +684,7 @@ public class Legacy4JClient {
         if (minecraft.screen instanceof HostOptionsScreen s) s.reloadPlayerButtons();
         else if (minecraft.screen instanceof LeaderboardsScreen s) {
             s.rebuildRenderableVList(minecraft);
-            s.repositionElements();
+            UIAccessor.of(s).reloadUI();
         }
     }
 
@@ -595,8 +697,8 @@ public class Legacy4JClient {
         }
         LegacyOptions.CLIENT_STORAGE.configMap.values().forEach(FactoryConfig::reset);
         LegacyOptions.CLIENT_STORAGE.save();
-        LegacyCommonOptions.COMMON_STORAGE.save();
         LegacyCommonOptions.COMMON_STORAGE.configMap.values().forEach(FactoryConfig::reset);
+        LegacyCommonOptions.COMMON_STORAGE.save();
         minecraft.options.save();
     }
 
@@ -617,3 +719,4 @@ public class Legacy4JClient {
     }
 
 }
+

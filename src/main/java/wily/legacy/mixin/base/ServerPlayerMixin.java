@@ -43,6 +43,7 @@ public abstract class ServerPlayerMixin extends Player implements LegacyPlayer, 
     boolean classicLoom = true;
     boolean disableExhaustion = false;
     boolean mayFlySurvival = false;
+    boolean visible = true;
 
     public ServerPlayerMixin(Level level, GameProfile gameProfile) {
         super(level, gameProfile);
@@ -136,7 +137,7 @@ public abstract class ServerPlayerMixin extends Player implements LegacyPlayer, 
 
     @Override
     public boolean isVisible() {
-        return !super.isInvisible();
+        return visible;
     }
 
     @Override
@@ -150,25 +151,27 @@ public abstract class ServerPlayerMixin extends Player implements LegacyPlayer, 
 
     @Override
     public void setVisibility(boolean visible) {
-        super.setInvisible(!visible);
+        this.visible = visible;
     }
 
     @Inject(method = "addAdditionalSaveData", at = @At("RETURN"))
     public void addAdditionalSaveData(ValueOutput valueOutput, CallbackInfo ci) {
         valueOutput.putBoolean("DisableExhaustion", isExhaustionDisabled());
         valueOutput.putBoolean("MayFlySurvival", mayFlySurvival());
+        valueOutput.putBoolean("HostInvisible", !isVisible());
     }
 
     @Inject(method = "readAdditionalSaveData", at = @At("HEAD"))
     public void readAdditionalSaveData(ValueInput input, CallbackInfo ci) {
         setDisableExhaustion(input.getBooleanOr("DisableExhaustion", false));
         setMayFlySurvival(input.getBooleanOr("MayFlySurvival", false));
+        setVisibility(!input.getBooleanOr("HostInvisible", false));
     }
 
     @Inject(method = "startSleepInBed", at = @At("RETURN"), cancellable = true)
     public void startSleepInBed(BlockPos blockPos, CallbackInfoReturnable<Either<BedSleepingProblem, Unit>> cir) {
         Either<BedSleepingProblem, Unit> either = cir.getReturnValue();
-        if (level()./*? if <1.21.5 {*//*isDay*//*?} else {*/isBrightOutside/*?}*/() && either.left().isPresent() && either.left().get() == BedSleepingProblem.NOT_POSSIBLE_NOW && !this.isCreative()) {
+        if (level()./*? if <1.21.5 {*//*isDay*//*?} else {*/isBrightOutside/*?}*/() && either.left().isPresent() && either.left().get() == BedSleepingProblem.OTHER_PROBLEM && !this.isCreative()) {
             Vec3 vec3 = Vec3.atBottomCenterOf(blockPos);
             if (!this.level().getEntitiesOfClass(Monster.class, new AABB(vec3.x() - 8.0, vec3.y() - 5.0, vec3.z() - 8.0, vec3.x() + 8.0, vec3.y() + 5.0, vec3.z() + 8.0), (argx) -> argx.isPreventingPlayerRest(level(), this)).isEmpty()) {
                 cir.setReturnValue(Either.left(BedSleepingProblem.NOT_SAFE));

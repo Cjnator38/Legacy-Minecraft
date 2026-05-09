@@ -2,7 +2,7 @@ package wily.legacy.client.screen;
 
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.gui.Font;
-import net.minecraft.client.gui.GuiGraphics;
+import net.minecraft.client.gui.GuiGraphicsExtractor;
 import net.minecraft.client.gui.components.*;
 import net.minecraft.client.gui.narration.NarratedElementType;
 import net.minecraft.client.gui.narration.NarrationElementOutput;
@@ -12,6 +12,7 @@ import wily.factoryapi.base.client.FactoryGuiGraphics;
 import wily.factoryapi.util.FactoryScreenUtil;
 import wily.legacy.client.CommonColor;
 import wily.legacy.client.LegacyOptions;
+import wily.legacy.client.RenderableVListEntry;
 import wily.legacy.util.LegacySprites;
 import wily.legacy.util.client.LegacyFontUtil;
 import wily.legacy.util.client.LegacyRenderUtil;
@@ -20,7 +21,7 @@ import java.util.function.BooleanSupplier;
 import java.util.function.Consumer;
 import java.util.function.Function;
 
-public class TickBox extends AbstractButton {
+public class TickBox extends AbstractButton implements RenderableVListEntry {
     protected final Function<Boolean, Component> message;
     private final Consumer<TickBox> onPress;
     public boolean selected;
@@ -69,23 +70,23 @@ public class TickBox extends AbstractButton {
     }
 
     @Override
-    protected void renderWidget(GuiGraphics guiGraphics, int i, int j, float f) {
+    protected void extractContents(GuiGraphicsExtractor GuiGraphicsExtractor, int i, int j, float f) {
         setAlpha(active ? 1.0F : 0.5F);
         Minecraft minecraft = Minecraft.getInstance();
-        FactoryGuiGraphics.of(guiGraphics).setBlitColor(1.0f, 1.0f, 1.0f, this.alpha);
+        FactoryGuiGraphics.of(GuiGraphicsExtractor).setBlitColor(1.0f, 1.0f, 1.0f, this.alpha);
         FactoryScreenUtil.enableBlend();
         FactoryScreenUtil.enableDepthTest();
-        FactoryGuiGraphics.of(guiGraphics).blitSprite(isHoveredOrFocused() ? LegacySprites.TICKBOX_HOVERED : LegacySprites.TICKBOX, this.getX(), this.getY(), getHeight(), getHeight());
+        FactoryGuiGraphics.of(GuiGraphicsExtractor).blitSprite(isHoveredOrFocused() ? LegacySprites.TICKBOX_HOVERED : LegacySprites.TICKBOX, this.getX(), this.getY(), getHeight(), getHeight());
         if (selected) {
             if (LegacyOptions.getUIMode().isSD())
-                FactoryGuiGraphics.of(guiGraphics).blitSprite(LegacySprites.SMALL_TICK, this.getX(), this.getY(), 11, 9);
-            else FactoryGuiGraphics.of(guiGraphics).blitSprite(LegacySprites.TICK, this.getX(), this.getY(), 14, 12);
+                FactoryGuiGraphics.of(GuiGraphicsExtractor).blitSprite(LegacySprites.SMALL_TICK, this.getX(), this.getY(), 11, 9);
+            else FactoryGuiGraphics.of(GuiGraphicsExtractor).blitSprite(LegacySprites.TICK, this.getX(), this.getY(), 14, 12);
         }
-        FactoryGuiGraphics.of(guiGraphics).setBlitColor(1.0f, 1.0f, 1.0f, 1.0F);
-        guiGraphics.pose().pushMatrix();
-        if (!isHoveredOrFocused()) guiGraphics.pose().translate(0.4f, 0.4f);
-        this.renderString(guiGraphics, minecraft.font, isHoveredOrFocused() ? LegacyRenderUtil.getDefaultTextColor() : CommonColor.INVENTORY_GRAY_TEXT.get());
-        guiGraphics.pose().popMatrix();
+        FactoryGuiGraphics.of(GuiGraphicsExtractor).setBlitColor(1.0f, 1.0f, 1.0f, 1.0F);
+        GuiGraphicsExtractor.pose().pushMatrix();
+        if (!isHoveredOrFocused()) GuiGraphicsExtractor.pose().translate(0.4f, 0.4f);
+        this.renderString(GuiGraphicsExtractor, minecraft.font, isHoveredOrFocused() ? LegacyRenderUtil.getDefaultTextColor() : CommonColor.GRAY_TEXT.get());
+        GuiGraphicsExtractor.pose().popMatrix();
     }
 
 
@@ -107,9 +108,8 @@ public class TickBox extends AbstractButton {
         }
     }
 
-    @Override
-    public void renderString(GuiGraphics guiGraphics, Font font, int i) {
-        LegacyFontUtil.applySDFont(b -> LegacyRenderUtil.renderScrollingString(guiGraphics, font, this.getMessage(), this.getX() + getHeight() + (LegacyOptions.getUIMode().isSD() ? 0 : 1), this.getY(), this.getX() + this.getWidth(), this.getY() + this.getHeight(), i, isHoveredOrFocused()));
+    public void renderString(GuiGraphicsExtractor GuiGraphicsExtractor, Font font, int i) {
+        LegacyFontUtil.applySDFont(b -> LegacyRenderUtil.renderScrollingString(GuiGraphicsExtractor, font, this.getMessage(), this.getX() + getHeight() + (LegacyOptions.getUIMode().isSD() ? 0 : 1), this.getY(), this.getX() + this.getWidth(), this.getY() + this.getHeight(), i, isHoveredOrFocused()));
     }
 
     public boolean updateValue() {
@@ -122,5 +122,10 @@ public class TickBox extends AbstractButton {
             }
         }
         return false;
+    }
+
+    @Override
+    public void initRenderable(RenderableVList list) {
+        updateHeight();
     }
 }

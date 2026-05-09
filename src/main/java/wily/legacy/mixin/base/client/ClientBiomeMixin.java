@@ -3,18 +3,27 @@ package wily.legacy.mixin.base.client;
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.multiplayer.ClientPacketListener;
 import net.minecraft.core.registries.Registries;
+import net.minecraft.world.attribute.EnvironmentAttributeMap;
 import net.minecraft.world.level.biome.Biome;
+import org.spongepowered.asm.mixin.Final;
 import org.spongepowered.asm.mixin.Mixin;
+import org.spongepowered.asm.mixin.Shadow;
 import org.spongepowered.asm.mixin.Unique;
 import org.spongepowered.asm.mixin.injection.At;
 import org.spongepowered.asm.mixin.injection.Inject;
+import org.spongepowered.asm.mixin.injection.callback.CallbackInfo;
 import org.spongepowered.asm.mixin.injection.callback.CallbackInfoReturnable;
+import wily.legacy.client.BiomeHolder;
 import wily.legacy.client.LegacyBiomeOverride;
 
 import java.util.Optional;
 
 @Mixin(Biome.class)
 public class ClientBiomeMixin {
+
+    @Shadow
+    @Final
+    private EnvironmentAttributeMap attributes;
 
     @Unique
     private Biome self() {
@@ -32,20 +41,8 @@ public class ClientBiomeMixin {
         biomeOverride().waterColor().ifPresent(cir::setReturnValue);
     }
 
-    @Inject(method = "getWaterFogColor", at = @At("HEAD"), cancellable = true)
-    private void getWaterFogColor(CallbackInfoReturnable<Integer> cir) {
-        LegacyBiomeOverride o = biomeOverride();
-        if (o.waterFogColor().isPresent() || o.waterColor().isPresent())
-            cir.setReturnValue(o.waterFogColor().isEmpty() ? o.waterColor().get() : o.waterFogColor().get());
-    }
-
-    @Inject(method = "getFogColor", at = @At("HEAD"), cancellable = true)
-    private void getFogColor(CallbackInfoReturnable<Integer> cir) {
-        biomeOverride().fogColor().ifPresent(cir::setReturnValue);
-    }
-
-    @Inject(method = "getSkyColor", at = @At("HEAD"), cancellable = true)
-    private void getSkyColor(CallbackInfoReturnable<Integer> cir) {
-        biomeOverride().skyColor().ifPresent(cir::setReturnValue);
+    @Inject(method = "<init>", at = @At("RETURN"))
+    private void init(CallbackInfo ci) {
+        if (((Object)attributes) instanceof BiomeHolder holder) holder.l4j$setBiome(self());
     }
 }

@@ -2,20 +2,21 @@ package wily.legacy.client.screen;
 
 import net.minecraft.ChatFormatting;
 import net.minecraft.client.Minecraft;
-import net.minecraft.client.gui.GuiGraphics;
+import net.minecraft.client.gui.GuiGraphicsExtractor;
 import net.minecraft.client.gui.components.Button;
 import net.minecraft.client.gui.components.Tooltip;
 import net.minecraft.client.gui.screens.Screen;
 import net.minecraft.client.gui.screens.worldselection.WorldOpenFlows;
 import net.minecraft.client.server.IntegratedServer;
+import net.minecraft.core.BlockPos;
 import net.minecraft.network.chat.Component;
 import net.minecraft.resources.ResourceKey;
 import net.minecraft.server.MinecraftServer;
 import net.minecraft.world.Difficulty;
-import net.minecraft.world.level.GameRules;
 import net.minecraft.world.level.GameType;
 import net.minecraft.world.level.Level;
-import net.minecraft.world.level.dimension.end.EndDragonFight;
+import net.minecraft.world.level.dimension.end.EnderDragonFight;
+import net.minecraft.world.level.gamerules.GameRules;
 import net.minecraft.world.level.storage.LevelStorageSource;
 import net.minecraft.world.level.storage.LevelSummary;
 import org.jetbrains.annotations.Nullable;
@@ -65,17 +66,26 @@ public class LoadSaveScreen extends PanelBackgroundScreen {
         this.parent = screen;
         this.summary = summary;
         this.access = access;
-        difficulty = summary.getSettings().difficulty();
+        difficulty = summary.getSettings().difficultySettings().difficulty();
         gameTypeSlider = new LegacySliderButton<>(0, 0, 220, 16, b -> b.getDefaultMessage(GAME_MODEL_LABEL, b.getObjectValue().getShortDisplayName()), b -> Tooltip.create(Component.translatable("selectWorld.gameMode." + b.getObjectValue().getName() + ".info")), summary.getSettings().gameType(), () -> GAME_TYPES, b -> {});
         gameTypeSlider.active = !summary.isHardcore();
         publishScreen = new PublishScreen(this, gameTypeSlider.getObjectValue());
-        onlineTickBox = new TickBox(0, 0, 220, publishScreen.publish, b -> PublishScreen.PUBLISH, b -> null, button -> {
-            if (button.selected) minecraft.setScreen(publishScreen);
-            button.selected = publishScreen.publish = false;
-        });
+        onlineTickBox = new TickBox(0, 0, 220, publishScreen.publish, b -> PublishScreen.getPublishComponent(), b -> PublishScreen.getPublishTooltip(), button -> {
+            if (LegacyOptions.legacySettingsMenus.get()) {
+                if (button.selected) publishScreen.setGameType(gameTypeSlider.getObjectValue());
+                publishScreen.publish = button.selected;
+                return;
+            }
+            if (!button.selected) {
+                publishScreen.publish = false;
+                return;
+            }
+            publishScreen.setGameType(gameTypeSlider.getObjectValue());
+            minecraft.setScreen(publishScreen);
+        }, () -> publishScreen.publish);
         hostPrivileges = hasCommands(summary);
         trustPlayers = LegacyClientWorldSettings.of(summary.getSettings()).trustPlayers();
-        (resourceAlbumSelector = PackAlbum.Selector.resources(panel.x + 13, panel.y + 112, 220, 45, !LegacyRenderUtil.hasTooltipBoxes(accessor), LegacyClientWorldSettings.of(summary.getSettings()).getSelectedResourceAlbum())).active = !this.isLocked;
+        (resourceAlbumSelector = PackAlbum.Selector.resources(panel.x + 13, panel.y + 112, 220, 45, !LegacyRenderUtil.hasTooltipBoxes(accessor), getSelectedResourceAlbum(summary))).active = !this.isLocked;
     }
 
     public LoadSaveScreen(Screen screen, LevelSummary summary, LevelStorageSource source) {
@@ -136,15 +146,24 @@ public class LoadSaveScreen extends PanelBackgroundScreen {
 
     public static void loadWorld(Screen screen, Minecraft minecraft, LevelStorageSource source, String levelId) {
         try (LevelStorageSource.LevelStorageAccess access = source.createAccess(levelId)) {
-            loadWorld(screen, minecraft, source, access.getSummary(/*? if >1.20.2 {*/access.getDataTag()/*?}*/));
+            loadWorld(screen, minecraft, source, access.fixAndGetSummary());
         } catch (IOException e) {
             throw new RuntimeException(e);
         }
     }
 
+    private static PackAlbum getSelectedResourceAlbum(LevelSummary summary) {
+        return PackAlbum.resolveWorldResourceAlbum(LegacyClientWorldSettings.of(summary.getSettings()).getSelectedResourceAlbum());
+    }
+
     public static void loadWorld(Screen screen, Minecraft minecraft, LevelStorageSource source, LevelSummary summary) {
         SaveRenderableList.resetIconCache();
-        PackAlbum.Selector.applyResourceChanges(minecraft, PackAlbum.getSelectedIds(minecraft.getResourcePackRepository()), LegacyClientWorldSettings.of(summary.getSettings()).getSelectedResourceAlbum().packs(), () -> new WorldOpenFlows(minecraft, source)./*? if <1.20.3 {*//*loadLevel*//*?} else if <1.20.5 {*//*checkForBackupAndLoad*//*?} else {*/openWorld/*?}*/(/*? if <1.20.3 {*//*screen, *//*?}*/summary.getLevelId()/*? if >1.20.2 {*/, () -> minecraft.setScreen(screen)/*?}*/));
+        PackAlbum album = getSelectedResourceAlbum(summary);
+        PackAlbum.Selector.applyResourceChanges(minecraft, PackAlbum.getSelectedIds(minecraft.getResourcePackRepository()), album.packs(), false, () -> new WorldOpenFlows(minecraft, source)./*? if <1.20.3 {*//*loadLevel*//*?} else if <1.20.5 {*//*checkForBackupAndLoad*//*?} else {*/openWorld/*?}*/(/*? if <1.20.3 {*//*screen, *//*?}*/summary.getLevelId()/*? if >1.20.2 {*/, () -> minecraft.setScreen(screen)/*?}*/));
+        Legacy4JClient.serverPlayerJoinConsumer = serverPlayer -> {
+            MinecraftServer server = FactoryAPIPlatform.getEntityServer(serverPlayer);
+            LegacyClientWorldSettings.of(server.getWorldData()).setSelectedResourceAlbum(album);
+        };
     }
 
     @Override
@@ -228,11 +247,15 @@ public class LoadSaveScreen extends PanelBackgroundScreen {
         loadWorld(this, minecraft, LegacySaveCache.getLevelStorageSource(), summary);
         Legacy4JClient.serverPlayerJoinConsumer = s -> {
             MinecraftServer server = FactoryAPIPlatform.getEntityServer(s);
-            if (dimensionsToReset.contains(Level.END))
-                server.getLevel(Level.END).setDragonFight(new EndDragonFight(minecraft.getSingleplayerServer().getLevel(Level.END), minecraft.getSingleplayerServer().getWorldData().worldGenOptions().seed(), EndDragonFight.Data.DEFAULT));
+            if (dimensionsToReset.contains(Level.END)) {
+                EnderDragonFight fight = EnderDragonFight.createDefault();
+                fight.init(minecraft.getSingleplayerServer().getLevel(Level.END), 0L, BlockPos.ZERO);
+                server.getLevel(Level.END).setDragonFight(fight);
+            }
             server.setDefaultGameType(gameTypeSlider.getObjectValue());
             server.setDifficulty(difficulty, false);
-            applyGameRules.accept(server.getGameRules(), minecraft.getSingleplayerServer());
+            applyGameRules.accept(s.level().getGameRules(), minecraft.getSingleplayerServer());
+            publishScreen.setGameType(gameTypeSlider.getObjectValue());
             publishScreen.publish((IntegratedServer) server);
             LegacyClientWorldSettings.of(server.getWorldData()).setAllowCommands(hostPrivileges);
             server.getPlayerList().sendPlayerPermissionLevel(s);
@@ -249,33 +272,35 @@ public class LoadSaveScreen extends PanelBackgroundScreen {
     }
 
     @Override
-    public void renderDefaultBackground(GuiGraphics guiGraphics, int i, int j, float f) {
-        super.renderDefaultBackground(guiGraphics, i, j, f);
-        resourceAlbumSelector.renderTooltipBox(guiGraphics, panel);
-        panel.render(guiGraphics, i, j, f);
-        guiGraphics.pose().pushMatrix();
-        guiGraphics.pose().translate(LegacyRenderUtil.hasHorizontalArtifacts() ? 0.46f : 0.5f, 0);
+    public void renderDefaultBackground(GuiGraphicsExtractor GuiGraphicsExtractor, int i, int j, float f) {
+        super.renderDefaultBackground(GuiGraphicsExtractor, i, j, f);
+        resourceAlbumSelector.renderTooltipBox(GuiGraphicsExtractor, panel);
+        panel.extractRenderState(GuiGraphicsExtractor, i, j, f);
+        GuiGraphicsExtractor.pose().pushMatrix();
+        GuiGraphicsExtractor.pose().translate(LegacyRenderUtil.hasHorizontalArtifacts() ? 0.46f : 0.5f, 0);
         int iconSize = accessor.getInteger("saveIcon.size", 29);
         int iconX = accessor.getInteger("saveIcon.x", panel.x + 14);
         int iconY = accessor.getInteger("saveIcon.y", panel.y + 10);
-        FactoryGuiGraphics.of(guiGraphics).blitSprite(LegacySprites.SQUARE_ENTITY_PANEL, iconX - 2, iconY - 1, iconSize + 3, iconSize + 3);
-        guiGraphics.pose().popMatrix();
-        guiGraphics.pose().pushMatrix();
-        guiGraphics.pose().translate(0, 0.6f);
-        FactoryGuiGraphics.of(guiGraphics).blit(SaveRenderableList.iconCache.getUnchecked(summary).textureLocation(), iconX, iconY, 0, 0, iconSize, iconSize, iconSize, iconSize);
+        FactoryGuiGraphics.of(GuiGraphicsExtractor).blitSprite(LegacySprites.SQUARE_ENTITY_PANEL, iconX - 2, iconY - 1, iconSize + 3, iconSize + 3);
+        GuiGraphicsExtractor.pose().popMatrix();
+        GuiGraphicsExtractor.pose().pushMatrix();
+        GuiGraphicsExtractor.pose().translate(0, 0.6f);
+        FactoryGuiGraphics.of(GuiGraphicsExtractor).blit(SaveRenderableList.iconCache.getUnchecked(summary).textureLocation(), iconX, iconY, 0, 0, iconSize, iconSize, iconSize, iconSize);
         LegacyFontUtil.applySDFont(b -> {
-            guiGraphics.drawString(font, summary.getLevelName(), accessor.getInteger("nameText.x", panel.x + 48), accessor.getInteger("nameText.y", panel.y + 12), CommonColor.INVENTORY_GRAY_TEXT.get(), false);
-            guiGraphics.drawString(font, Component.translatable("legacy.menu.load_save.created_in", (hasCommands(summary) ? GameType.CREATIVE : GameType.SURVIVAL).getShortDisplayName()), accessor.getInteger("creationText.x", panel.x + 48), accessor.getInteger("creationText.y", panel.y + 29), CommonColor.INVENTORY_GRAY_TEXT.get(), false);
-            guiGraphics.pose().popMatrix();
+            GuiGraphicsExtractor.text(font, summary.getLevelName(), accessor.getInteger("nameText.x", panel.x + 48), accessor.getInteger("nameText.y", panel.y + 12), CommonColor.GRAY_TEXT.get(), false);
+            GuiGraphicsExtractor.text(font, Component.translatable("legacy.menu.load_save.created_in", (hasCommands(summary) ? GameType.CREATIVE : GameType.SURVIVAL).getShortDisplayName()), accessor.getInteger("creationText.x", panel.x + 48), accessor.getInteger("creationText.y", panel.y + 29), CommonColor.GRAY_TEXT.get(), false);
+            GuiGraphicsExtractor.pose().popMatrix();
             if (!isLocked)
-                guiGraphics.drawString(font, Component.translatable("commands.seed.success", LegacyClientWorldSettings.of(summary.getSettings()).getDisplaySeed()), accessor.getInteger("seedText.x", panel.x + 13), accessor.getInteger("seedText.y", panel.y + 49), CommonColor.INVENTORY_GRAY_TEXT.get(), false);
+                GuiGraphicsExtractor.text(font, Component.translatable("commands.seed.success", LegacyClientWorldSettings.of(summary.getSettings()).getDisplaySeed()), accessor.getInteger("seedText.x", panel.x + 13), accessor.getInteger("seedText.y", panel.y + 49), CommonColor.GRAY_TEXT.get(), false);
         });
     }
 
     @Override
-    public void render(GuiGraphics guiGraphics, int i, int j, float f) {
-        super.render(guiGraphics, i, j, f);
+    public void extractRenderState(GuiGraphicsExtractor GuiGraphicsExtractor, int i, int j, float f) {
+        onlineTickBox.updateValue();
+        super.extractRenderState(GuiGraphicsExtractor, i, j, f);
+        if (LegacyOptions.legacySettingsMenus.get()) GuiGraphicsExtractor.deferredTooltip = null;
         if (LegacyRenderUtil.isMouseOver(i, j, panel.x + 14.5, panel.y + 10, 29, 29))
-            guiGraphics.setTooltipForNextFrame(font, Component.translatable("selectWorld.targetFolder", Component.literal(summary.getLevelId()).withStyle(ChatFormatting.ITALIC)), i, j);
+            GuiGraphicsExtractor.setTooltipForNextFrame(font, Component.translatable("selectWorld.targetFolder", Component.literal(summary.getLevelId()).withStyle(ChatFormatting.ITALIC)), i, j);
     }
 }

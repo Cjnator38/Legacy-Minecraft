@@ -1,21 +1,24 @@
 package wily.legacy.mixin.base.client.anvil;
 
-import net.minecraft.client.gui.GuiGraphics;
+import net.minecraft.client.gui.GuiGraphicsExtractor;
 import net.minecraft.client.gui.components.EditBox;
 import net.minecraft.client.gui.screens.inventory.AnvilScreen;
 import net.minecraft.client.gui.screens.inventory.ItemCombinerScreen;
 import net.minecraft.client.input.KeyEvent;
 import net.minecraft.network.chat.Component;
-import net.minecraft.resources.ResourceLocation;
+import net.minecraft.resources.Identifier;
 import net.minecraft.world.entity.player.Inventory;
 import net.minecraft.world.entity.player.Player;
 import net.minecraft.world.inventory.AnvilMenu;
 import net.minecraft.world.inventory.Slot;
+import net.minecraft.world.item.ItemStack;
 import org.spongepowered.asm.mixin.Final;
 import org.spongepowered.asm.mixin.Mixin;
+import org.spongepowered.asm.mixin.Mutable;
 import org.spongepowered.asm.mixin.Shadow;
 import org.spongepowered.asm.mixin.injection.At;
 import org.spongepowered.asm.mixin.injection.Inject;
+import org.spongepowered.asm.mixin.injection.Redirect;
 import org.spongepowered.asm.mixin.injection.callback.CallbackInfo;
 import org.spongepowered.asm.mixin.injection.callback.CallbackInfoReturnable;
 import wily.factoryapi.base.client.FactoryGuiGraphics;
@@ -24,6 +27,7 @@ import wily.legacy.client.CommonColor;
 import wily.legacy.client.LegacyOptions;
 import wily.legacy.init.LegacyRegistries;
 import wily.legacy.inventory.LegacySlotDisplay;
+import wily.legacy.inventory.RenameItemMenu;
 import wily.legacy.util.LegacySprites;
 import wily.legacy.util.client.LegacyFontUtil;
 import wily.legacy.util.client.LegacySoundUtil;
@@ -31,7 +35,7 @@ import wily.legacy.util.client.LegacySoundUtil;
 @Mixin(AnvilScreen.class)
 public abstract class AnvilScreenMixin extends ItemCombinerScreen<AnvilMenu> {
 
-    private static final LegacySlotDisplay SLOTS_DISPLAY = new LegacySlotDisplay() {
+private static final LegacySlotDisplay SLOTS_DISPLAY = new LegacySlotDisplay() {
         public int getWidth() {
             return 30;
         }
@@ -50,7 +54,7 @@ public abstract class AnvilScreenMixin extends ItemCombinerScreen<AnvilMenu> {
     @Final
     private Player player;
 
-    public AnvilScreenMixin(AnvilMenu itemCombinerMenu, Inventory inventory, Component component, ResourceLocation resourceLocation) {
+    public AnvilScreenMixin(AnvilMenu itemCombinerMenu, Inventory inventory, Component component, Identifier resourceLocation) {
         super(itemCombinerMenu, inventory, component, resourceLocation);
     }
 
@@ -60,8 +64,8 @@ public abstract class AnvilScreenMixin extends ItemCombinerScreen<AnvilMenu> {
     @Override
     public void init() {
         boolean sd = LegacyOptions.getUIMode().isSD();
-        imageWidth = sd ? 130 : 207;
-        imageHeight = sd ? 140 : 215;
+        ((wily.legacy.mixin.base.client.AbstractContainerScreenAccessor) this).legacy$setImageWidth(sd ? 130 : 207);
+        ((wily.legacy.mixin.base.client.AbstractContainerScreenAccessor) this).legacy$setImageHeight(sd ? 140 : 215);
         inventoryLabelX = sd ? 7 : 10;
         inventoryLabelY = sd ? 67 : 105;
         titleLabelX = sd ? 54 : 73;
@@ -103,11 +107,11 @@ public abstract class AnvilScreenMixin extends ItemCombinerScreen<AnvilMenu> {
         this.name.setValue(string);
     }
 
-    @Inject(method = "renderLabels", at = @At("HEAD"), cancellable = true)
-    public void renderLabels(GuiGraphics guiGraphics, int i, int j, CallbackInfo ci) {
+    @Inject(method = "extractLabels", at = @At("HEAD"), cancellable = true)
+    public void extractLabels(GuiGraphicsExtractor GuiGraphicsExtractor, int i, int j, CallbackInfo ci) {
         ci.cancel();
         LegacyFontUtil.applySDFont(b -> {
-            super.renderLabels(guiGraphics, i, j);
+            super.extractLabels(GuiGraphicsExtractor, i, j);
             int k = this.menu.getCost();
             if (k > 0) {
                 Component component;
@@ -125,7 +129,7 @@ public abstract class AnvilScreenMixin extends ItemCombinerScreen<AnvilMenu> {
                 }
                 if (component != null) {
                     int m = this.imageWidth - 8 - this.font.width(component) - 2;
-                    guiGraphics.drawString(this.font, component, m, b ? 58 : 90, l);
+                    GuiGraphicsExtractor.text(this.font, component, m, b ? 58 : 90, l);
                 }
             }
         });
@@ -146,36 +150,41 @@ public abstract class AnvilScreenMixin extends ItemCombinerScreen<AnvilMenu> {
     }
 
     @Override
-    public void renderBackground(GuiGraphics guiGraphics, int i, int j, float f) {
-        renderBg(guiGraphics, f, i, j);
+    public void extractBackground(GuiGraphicsExtractor GuiGraphicsExtractor, int i, int j, float f) {
+        super.extractBackground(GuiGraphicsExtractor, i, j, f);
     }
 
-    @Inject(method = "renderBg", at = @At("HEAD"), cancellable = true)
-    public void renderBg(GuiGraphics guiGraphics, float f, int i, int j, CallbackInfo ci) {
+    @Inject(method = "extractBackground", at = @At("HEAD"), cancellable = true)
+    public void renderBg(GuiGraphicsExtractor GuiGraphicsExtractor, int i, int j, float f, CallbackInfo ci) {
         ci.cancel();
         boolean sd = LegacyOptions.getUIMode().isSD();
-        FactoryGuiGraphics.of(guiGraphics).blitSprite(UIAccessor.of(this).getResourceLocation("imageSprite", sd ? LegacySprites.PANEL : LegacySprites.SMALL_PANEL), leftPos, topPos, imageWidth, imageHeight);
-        guiGraphics.pose().pushMatrix();
-        guiGraphics.pose().translate(leftPos + (sd ? 6.5f : 13.5f), topPos + (sd ? 3.5f : 9.5f));
-        guiGraphics.pose().scale(sd ? 2.0f : 2.5f, sd ? 2.0f : 2.5f);
-        FactoryGuiGraphics.of(guiGraphics).blitSprite(LegacySprites.ANVIL_HAMMER, 0, 0, 15, 15);
-        guiGraphics.pose().popMatrix();
-        guiGraphics.pose().pushMatrix();
-        guiGraphics.pose().translate(leftPos + (sd ? 34.5f : 53), topPos + (sd ? 39 : 60));
-        if (!sd) guiGraphics.pose().scale(1.5f, 1.5f);
-        FactoryGuiGraphics.of(guiGraphics).blitSprite(LegacySprites.COMBINER_PLUS, 0, 0, 13, 13);
-        guiGraphics.pose().popMatrix();
-        guiGraphics.pose().pushMatrix();
-        guiGraphics.pose().translate(leftPos + (sd ? 81 : 122), topPos + (sd ? 38 : 59));
-        if (!sd) guiGraphics.pose().scale(1.5f, 1.5f);
-        FactoryGuiGraphics.of(guiGraphics).blitSprite(sd ? LegacySprites.SMALL_ARROW : LegacySprites.ARROW, 0, 0, sd ? 16 : 22, sd ? 14 : 15);
+        FactoryGuiGraphics.of(GuiGraphicsExtractor).blitSprite(UIAccessor.of(this).getResourceLocation("imageSprite", sd ? LegacySprites.PANEL : LegacySprites.SMALL_PANEL), leftPos, topPos, imageWidth, imageHeight);
+        GuiGraphicsExtractor.pose().pushMatrix();
+        GuiGraphicsExtractor.pose().translate(leftPos + (sd ? 6.5f : 13.5f), topPos + (sd ? 3.5f : 9.5f));
+        GuiGraphicsExtractor.pose().scale(sd ? 2.0f : 2.5f, sd ? 2.0f : 2.5f);
+        FactoryGuiGraphics.of(GuiGraphicsExtractor).blitSprite(LegacySprites.ANVIL_HAMMER, 0, 0, 15, 15);
+        GuiGraphicsExtractor.pose().popMatrix();
+        GuiGraphicsExtractor.pose().pushMatrix();
+        GuiGraphicsExtractor.pose().translate(leftPos + (sd ? 34.5f : 53), topPos + (sd ? 39 : 60));
+        if (!sd) GuiGraphicsExtractor.pose().scale(1.5f, 1.5f);
+        FactoryGuiGraphics.of(GuiGraphicsExtractor).blitSprite(LegacySprites.COMBINER_PLUS, 0, 0, 13, 13);
+        GuiGraphicsExtractor.pose().popMatrix();
+        GuiGraphicsExtractor.pose().pushMatrix();
+        GuiGraphicsExtractor.pose().translate(leftPos + (sd ? 81 : 122), topPos + (sd ? 38 : 59));
+        if (!sd) GuiGraphicsExtractor.pose().scale(1.5f, 1.5f);
+        FactoryGuiGraphics.of(GuiGraphicsExtractor).blitSprite(sd ? LegacySprites.SMALL_ARROW : LegacySprites.ARROW, 0, 0, sd ? 16 : 22, sd ? 14 : 15);
         if ((this.menu.getSlot(0).hasItem() || this.menu.getSlot(1).hasItem()) && !this.menu.getSlot(this.menu.getResultSlot()).hasItem())
-            FactoryGuiGraphics.of(guiGraphics).blitSprite(LegacySprites.ERROR_CROSS, 4, 0, 15, 15);
-        guiGraphics.pose().popMatrix();
+            FactoryGuiGraphics.of(GuiGraphicsExtractor).blitSprite(LegacySprites.ERROR_CROSS, 4, 0, 15, 15);
+        GuiGraphicsExtractor.pose().popMatrix();
     }
 
     @Inject(method = "keyPressed", at = @At(value = "INVOKE", target = "Lnet/minecraft/client/player/LocalPlayer;closeContainer()V"))
     public void keyPressed(KeyEvent keyEvent, CallbackInfoReturnable<Boolean> cir) {
         LegacySoundUtil.playBackSound();
+    }
+
+    @Redirect(method = "slotChanged", at = @At(value = "INVOKE", target = "Lnet/minecraft/world/item/ItemStack;getHoverName()Lnet/minecraft/network/chat/Component;"))
+    private Component slotChanged(ItemStack itemStack) {
+        return Component.literal(RenameItemMenu.getItemName(itemStack));
     }
 }

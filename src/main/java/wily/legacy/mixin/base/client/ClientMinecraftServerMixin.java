@@ -10,6 +10,7 @@ import net.minecraft.server.WorldStem;
 import net.minecraft.server.level.ServerLevel;
 import net.minecraft.server.level.progress.LevelLoadListener;
 import net.minecraft.server.packs.repository.PackRepository;
+import net.minecraft.world.level.gamerules.GameRules;
 import net.minecraft.world.level.storage.LevelStorageSource;
 import org.objectweb.asm.Opcodes;
 import org.spongepowered.asm.mixin.Final;
@@ -27,6 +28,7 @@ import wily.legacy.client.screen.LegacyLoadingScreen;
 import wily.legacy.network.TopMessage;
 
 import java.net.Proxy;
+import java.util.Optional;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.Executor;
 import java.util.function.BooleanSupplier;
@@ -51,7 +53,7 @@ public abstract class ClientMinecraftServerMixin {
     public abstract Iterable<ServerLevel> getAllLevels();
 
     @Inject(method = "<init>", at = @At("RETURN"))
-    private void init(Thread thread, LevelStorageSource.LevelStorageAccess levelStorageAccess, PackRepository packRepository, WorldStem worldStem, Proxy proxy, DataFixer dataFixer, Services services, LevelLoadListener levelLoadListener, CallbackInfo ci) {
+    private void init(Thread thread, LevelStorageSource.LevelStorageAccess levelStorageAccess, PackRepository packRepository, WorldStem worldStem, Optional<GameRules> gameRules, Proxy proxy, DataFixer dataFixer, Services services, LevelLoadListener levelLoadListener, boolean bl, CallbackInfo ci) {
         ticksUntilAutosave *= Math.max(1, LegacyOptions.autoSaveInterval.get());
     }
 
@@ -70,7 +72,7 @@ public abstract class ClientMinecraftServerMixin {
 
         if (ticksUntilAutosave >= 20 && ticksUntilAutosave <= 120) {
             if (ticksUntilAutosave % 20 == 0)
-                TopMessage.setMedium(new TopMessage(Component.translatable("legacy.menu.autoSave_countdown", ticksUntilAutosave / 20 - 1), CommonColor.INVENTORY_GRAY_TEXT.get(), 21, false, false, false));
+                TopMessage.setMedium(new TopMessage(Component.translatable("legacy.menu.autoSave_countdown", ticksUntilAutosave / 20 - 1), CommonColor.GRAY_TEXT.get(), 21, false, false, false));
         }
 
         if (ticksUntilAutosave <= 0) {
@@ -131,14 +133,7 @@ public abstract class ClientMinecraftServerMixin {
     @Inject(method = "saveEverything", at = @At("RETURN"))
     public void saveEverything(boolean bl, boolean bl2, boolean bl3, CallbackInfoReturnable<Boolean> cir) {
         if (!LegacySaveCache.isCurrentWorldSource(storageSource)) return;
-        CompletableFuture.runAsync(() -> {
-            isSaving = true;
-            Iterable<ServerLevel> levels = getAllLevels();
-            levels.forEach(l -> l.noSave = true);
-            LegacySaveCache.saveLevel(storageSource);
-            levels.forEach(l -> l.noSave = false);
-            isSaving = false;
-        }, executor);
+        LegacySaveCache.saveLevel(storageSource);
     }
 
     @Inject(method = "stopServer", at = @At("HEAD"))

@@ -18,6 +18,7 @@ import org.objectweb.asm.Opcodes;
 import org.spongepowered.asm.mixin.Final;
 import org.spongepowered.asm.mixin.Mixin;
 import org.spongepowered.asm.mixin.Shadow;
+import org.spongepowered.asm.mixin.gen.Invoker;
 import org.spongepowered.asm.mixin.injection.At;
 import org.spongepowered.asm.mixin.injection.Inject;
 import org.spongepowered.asm.mixin.injection.Redirect;
@@ -26,6 +27,8 @@ import wily.factoryapi.FactoryAPIClient;
 
 @Mixin(HumanoidModel.class)
 public abstract class HumanoidModelMixin {
+    private static final int LEGACY_TRIDENT_RAISE_TICKS = 6;
+    private static final float VANILLA_TRIDENT_X_ROT_SCALE = 0.5F;
 
 
     @Shadow
@@ -36,12 +39,49 @@ public abstract class HumanoidModelMixin {
     @Final
     public ModelPart leftArm;
 
+    @Invoker("poseRightArm")
+    protected abstract void legacy$poseRightArm(HumanoidRenderState humanoidRenderState);
+
+    @Invoker("poseLeftArm")
+    protected abstract void legacy$poseLeftArm(HumanoidRenderState humanoidRenderState);
+
+    private float getLegacyTridentRaiseProgress(int ticksUsingItem) {
+        return switch (Mth.clamp(ticksUsingItem, 0, LEGACY_TRIDENT_RAISE_TICKS)) {
+            case 0 -> 0.0F;
+            case 1 -> 0.70F;
+            case 2 -> 0.76F;
+            case 3 -> 0.82F;
+            case 4 -> 0.88F;
+            case 5 -> 0.94F;
+            default -> 1.0F;
+        };
+    }
+
+    private void applyLegacyTridentRaise(ModelPart armModel, int ticksUsingItem) {
+        float targetXRot = armModel.xRot;
+        float startXRot = (targetXRot + (float) Math.PI) / VANILLA_TRIDENT_X_ROT_SCALE;
+        float progress = getLegacyTridentRaiseProgress(ticksUsingItem);
+        armModel.xRot = Mth.lerp(progress, startXRot, targetXRot);
+    }
+
+    private void applyLegacyTridentSupportArmPose(HumanoidRenderState humanoidRenderState, HumanoidArm useArm) {
+        HumanoidArm supportArm = useArm.getOpposite();
+        HumanoidModel.ArmPose supportArmPose = supportArm == HumanoidArm.RIGHT ? humanoidRenderState.rightArmPose : humanoidRenderState.leftArmPose;
+        if (supportArmPose == null || supportArmPose.isTwoHanded()) {
+            return;
+        }
+        if (supportArm == HumanoidArm.RIGHT) {
+            legacy$poseRightArm(humanoidRenderState);
+        } else {
+            legacy$poseLeftArm(humanoidRenderState);
+        }
+    }
 
     @Inject(method = /*? if <1.21.2 {*//*"setupAnim(Lnet/minecraft/world/entity/LivingEntity;FFFFF)V"*//*?} else {*/"setupAnim(Lnet/minecraft/client/renderer/entity/state/HumanoidRenderState;)V"/*?}*/, at = @At("TAIL"))
     private void setupAnim(/*? if <1.21.2 {*/ /*LivingEntity livingEntity, float f, float g, float h, float i, float j*//*?} else {*/ HumanoidRenderState humanoidRenderState/*?}*/, CallbackInfo info) {
         HumanoidArm mainArm = /*? if <1.21.2 {*//*livingEntity.getMainArm()*//*?} else {*/ humanoidRenderState.mainArm/*?}*/;
         float ageInTicks = /*? if <1.21.2 {*//*h*//*?} else {*/humanoidRenderState.ageInTicks/*?}*/;
-        if (/*? if <1.21.2 {*//*!livingEntity.hasItemInSlot(EquipmentSlot.MAINHAND)*//*?} else {*/ humanoidRenderState.getMainHandItem().isEmpty()/*?}*/ && /*? if <1.21.2 {*//*livingEntity.isShiftKeyDown()*//*?} else {*/humanoidRenderState.isDiscrete/*?}*/ && /*? if <1.21.2 {*//*livingEntity.isFallFlying()*//*?} else {*/humanoidRenderState.isFallFlying/*?}*/) {
+        if (/*? if <1.21.2 {*//*!livingEntity.hasItemInSlot(EquipmentSlot.MAINHAND)*//*?} else {*/ humanoidRenderState.getMainHandItemStack().isEmpty()/*?}*/ && /*? if <1.21.2 {*//*livingEntity.isShiftKeyDown()*//*?} else {*/humanoidRenderState.isDiscrete/*?}*/ && /*? if <1.21.2 {*//*livingEntity.isFallFlying()*//*?} else {*/humanoidRenderState.isFallFlying/*?}*/) {
             (mainArm == HumanoidArm.RIGHT ? this.rightArm : leftArm).xRot = (float) (Math.PI) + (mainArm == HumanoidArm.RIGHT ? 1.0f : -1.0f) * Mth.sin(ageInTicks * 0.067F) * 0.05F;
         }
         HumanoidArm useArm = /*? if <1.21.2 {*//*livingEntity.getUsedItemHand()*//*?} else {*/ humanoidRenderState.useItemHand/*?}*/ == InteractionHand.MAIN_HAND ? mainArm : mainArm.getOpposite();
@@ -56,6 +96,10 @@ public abstract class HumanoidModelMixin {
             float eased = (1 - (float) Math.pow(1 - prog, 3));
             armModel.xRot = eased * -1.3f + (time > 1.2f ? (1 - Math.abs(Mth.sin(ageInTicks * 0.8f) * 2)) * 0.09f : 0);
             armModel.yRot = (isRightHand ? -0.45f : 0.45f) * eased;
+        }
+        if (/*? if <1.21.2 {*//*livingEntity.getUseItemRemainingTicks() > 0*//*?} else {*/humanoidRenderState.isUsingItem/*?}*/ && useAnim == /*? if <1.21.2 {*//*UseAnim.SPEAR*//*?} else if <1.21.11 {*//*ItemUseAnimation.SPEAR*//*?} else {*/ItemUseAnimation.TRIDENT/*?}*/) {
+            applyLegacyTridentSupportArmPose(humanoidRenderState, useArm);
+            applyLegacyTridentRaise(useArm == HumanoidArm.RIGHT ? rightArm : leftArm, /*? if <1.21.2 {*//*livingEntity.getTicksUsingItem()*//*?} else {*/Math.round(humanoidRenderState.ticksUsingItem)/*?}*/);
         }
     }
 
