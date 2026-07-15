@@ -28,6 +28,7 @@ import wily.factoryapi.base.client.FactoryOptions;
 import wily.factoryapi.base.config.FactoryConfig;
 import wily.legacy.Legacy4JClient;
 import wily.legacy.client.*;
+import wily.legacy.client.screen.globalleaderboards.GlobalLeaderboardsFeature;
 import wily.legacy.config.LegacyCommonOptions;
 import wily.legacy.util.LegacyComponents;
 
@@ -221,6 +222,15 @@ public class OptionsScreen extends PanelVListScreen {
                 LegacyOptions.displayPackManagementTooltips::get);
     }
 
+    private static TickBox createGlobalLeaderboardsTickBox() {
+        return new TickBox(0, 0, 200,
+                !GlobalLeaderboardsFeature.isOptedOut(),
+                b -> Component.translatable("legacy.options.globalLeaderboards"),
+                b -> FactoryConfigWidgets.getCachedTooltip(Component.translatable("legacy.options.globalLeaderboards.tooltip")),
+                t -> GlobalLeaderboardsFeature.setEnabled(t.selected),
+                () -> !GlobalLeaderboardsFeature.isOptedOut());
+    }
+
     static AbstractWidget createLegacyGraphicsPresetWidget(boolean active) {
         AbstractWidget widget = LegacyConfigWidgets.createWidget(LegacyOptions.showOptionsPresetInLegacyGraphics);
         widget.active = active;
@@ -394,7 +404,9 @@ public class OptionsScreen extends PanelVListScreen {
                                 LegacyOptions.mapsWithCoords,
                                 LegacyOptions.vanillaTutorial,
                                 LegacyOptions.forceLegacyFlight,
-                                LegacyOptions.forceLegacySwimming),
+                                LegacyOptions.forceLegacySwimming,
+                                LegacyOptions.forceLegacyShieldControls,
+                                LegacyOptions.forceLegacyOffhandLimits),
                         o -> {
                             if (mc.level == null)
                                 LegacyCommonOptions.COMMON_STORAGE.configMap.values().forEach(c -> o.renderableVList.addRenderable(LegacyConfigWidgets.createWidget(c, b -> c.sync())));
@@ -425,12 +437,13 @@ public class OptionsScreen extends PanelVListScreen {
                         o -> o.renderableVList.addOptionsCategory(
                                 Component.translatable("legacy.menu.save_settings"),
                                 LegacyOptions.autoSaveWhenPaused,
-                                LegacyOptions.directSaveLoad,
-                                LegacyOptions.saveCache),
+                                LegacyOptions.directSaveLoad),
+                                o -> o.renderableVList.addLinkedOptions(LegacyOptions.saveCache, FactoryConfig::get, LegacyOptions.alwaysClearSaveCache),
                         o -> o.renderableVList.addOptionsCategory(
                                 Component.translatable("legacy.menu.misc"),
                                 LegacyOptions.of(mc.options.realmsNotifications()),
-                                LegacyOptions.of(mc.options.allowServerListing())),
+                                LegacyOptions.of(mc.options.allowServerListing()))
+                                .addRenderable(createGlobalLeaderboardsTickBox()),
                         o -> o.renderableVList.addRenderables(
                                 RenderableVListScreen.openScreenButton(LegacyComponents.RESET_KNOWN_BLOCKS_TITLE, () -> ConfirmationScreen.createResetKnownListingScreen(o, LegacyComponents.RESET_KNOWN_BLOCKS_TITLE, LegacyComponents.RESET_KNOWN_BLOCKS_MESSAGE, Legacy4JClient.knownBlocks)).build(),
                                 RenderableVListScreen.openScreenButton(LegacyComponents.RESET_KNOWN_ENTITIES_TITLE, () -> ConfirmationScreen.createResetKnownListingScreen(o, LegacyComponents.RESET_KNOWN_ENTITIES_TITLE, LegacyComponents.RESET_KNOWN_ENTITIES_MESSAGE, Legacy4JClient.knownEntities)).build()))));
@@ -452,6 +465,7 @@ public class OptionsScreen extends PanelVListScreen {
                                 LegacyOptions.backSound,
                                 LegacyOptions.hoverFocusSound,
                                 LegacyOptions.inventoryHoverFocusSound,
+                                LegacyOptions.unlinkMusicFromMasterVolume,
                                 LegacyOptions.of(mc.options.showSubtitles()),
                                 LegacyOptions.of(mc.options.directionalAudio()),
                                 LegacyOptions.of(mc.options.musicFrequency()),
@@ -494,7 +508,7 @@ public class OptionsScreen extends PanelVListScreen {
                 }
             };
             GlobalPacks.Selector globalPackSelector = GlobalPacks.Selector.resources(0, 0, 230, 45, false);
-            PackAlbum.Selector selector = PackAlbum.Selector.globalResources(0, 0, 230, 45, false);
+            PackAlbum.Selector selector = mc.hasSingleplayerServer() ? PackAlbum.Selector.resources(0, 0, 230, 45, false) : PackAlbum.Selector.globalResources(0, 0, 230, 45, false);
             OptionsScreen screen = new OptionsScreen(p, s) {
                 int selectorTooltipVisibility = 0;
                 boolean finishedAnimation = false;
@@ -583,6 +597,7 @@ public class OptionsScreen extends PanelVListScreen {
                                 LegacyOptions.of(mc.options.prioritizeChunkUpdates()),
                                 LegacyOptions.of(mc.options.biomeBlendRadius()),
                                 LegacyOptions.of(mc.options.entityDistanceScaling()),
+                                LegacyOptions.legacyEntityDistance,
                                 LegacyOptions.of(mc.options.entityShadows())),
                         o -> o.renderableVList.addCategory(Component.translatable("legacy.menu.legacy_settings")),
                         o -> o.renderableVList.addLinkedOptions(
@@ -599,6 +614,7 @@ public class OptionsScreen extends PanelVListScreen {
                                 LegacyOptions.legacyCloudHeightAndTexture),
                         o -> o.renderableVList.addOptions(
                                 LegacyOptions.legacySkyShape,
+                                LegacyOptions.slowChunkLoading,
                                 LegacyOptions.fastLeavesWhenBlocked,
                                 LegacyOptions.fastLeavesCustomModels,
                                 LegacyOptions.displayNameTagBorder,
@@ -606,9 +622,9 @@ public class OptionsScreen extends PanelVListScreen {
                                 LegacyOptions.enhancedItemTranslucency,
                                 LegacyOptions.loyaltyLines,
                                 LegacyOptions.merchantTradingIndicator,
-                                LegacyOptions.legacyBabyVillagerHead,
                                 LegacyOptions.legacyFireworks,
                                 LegacyOptions.legacyEvokerFangs,
+                                LegacyOptions.legacyDrownedHeight,
                                 LegacyOptions.legacyDrownedAnimation,
                                 LegacyOptions.legacyZombieAggressionAnimation,
                                 LegacyOptions.legacyEntityFireTint,
@@ -734,7 +750,8 @@ public class OptionsScreen extends PanelVListScreen {
                                     LegacyOptions.legacyIntroAndReloading,
                                     LegacyOptions.legacyLoadingAndConnecting,
                                     LegacyOptions.legacyPanorama,
-                                    LegacyOptions.displayRealmsButton);
+                                    LegacyOptions.displayRealmsButton,
+                                    LegacyOptions.displayReinstallContentButton);
                             if (FactoryAPI.isModLoaded("sodium")) {
                                 o.renderableVList.addOptions(LegacyOptions.hideSodiumSettings);
                             }

@@ -191,9 +191,26 @@ public class RenderableVList {
         for (int i = start; i >= 0 && i < renderables.size(); i += step) {
             Renderable renderable = renderables.get(i);
             if (renderable instanceof GuiEventListener) {
-                focusRenderable(renderable);
+                revealRenderable(renderable);
+                if (renderable instanceof GuiEventListener listener && getScreen().children().contains(listener)) {
+                    getScreen().changeFocus(ComponentPath.path(listener, getScreen()));
+                } else {
+                    focusRenderable(renderable);
+                }
                 return true;
             }
+        }
+        return false;
+    }
+
+    private boolean isEdgeFocused(boolean last) {
+        GuiEventListener focused = getScreen().getFocused();
+        if (focused == null) return false;
+        int start = last ? renderables.size() - 1 : 0;
+        int step = last ? -1 : 1;
+        for (int i = start; i >= 0 && i < renderables.size(); i += step) {
+            Renderable renderable = renderables.get(i);
+            if (renderable instanceof GuiEventListener) return renderable == focused;
         }
         return false;
     }
@@ -346,6 +363,7 @@ public class RenderableVList {
     public boolean keyPressed(int i, boolean cyclic) {
         if (renderables.contains(getScreen().getFocused()) && renderablesCount > 1) {
             if (i == InputConstants.KEY_DOWN) {
+                if (!canScrollDown && cyclic && isEdgeFocused(true)) return focusEdgeRenderable(false);
                 ComponentPath path = getDirectionalNextFocusPath(ScreenDirection.DOWN);
                 if (isInvalidFocus(path, true)) {
                     if (canScrollDown) {
@@ -356,6 +374,7 @@ public class RenderableVList {
                 }
             }
             if (i == InputConstants.KEY_UP) {
+                if (scrolledList.get() == 0 && cyclic && isEdgeFocused(false)) return focusEdgeRenderable(true);
                 ComponentPath path = getDirectionalNextFocusPath(ScreenDirection.UP);
                 if (isInvalidFocus(path, true)) {
                     if (scrolledList.get() > 0) {

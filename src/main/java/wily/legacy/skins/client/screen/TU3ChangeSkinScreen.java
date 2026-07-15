@@ -41,11 +41,11 @@ public class TU3ChangeSkinScreen extends AbstractChangeSkinScreen {
     private Tu3NavZone tu3NavZone = Tu3NavZone.CAROUSEL;
 
     public TU3ChangeSkinScreen(Screen parent) {
-        super(parent);
+        this(parent, ChangeSkinScreenSource.Default.INSTANCE);
     }
 
     public TU3ChangeSkinScreen(Screen parent, ChangeSkinScreenSource source) {
-        super(parent, source);
+        super(parent, source, false);
     }
 
     private void refreshTu3Layout() {

@@ -92,6 +92,10 @@ import static wily.legacy.client.screen.ControlTooltip.MORE;
 public class LegacyRenderUtil {
     public static final boolean isNvidia;
     public static boolean suppressInventoryElytraPose;
+    @Nullable
+    public static Integer tooltipTextColorOverride;
+    public static boolean tooltipTextColorOverrideForcesStyle;
+    public static boolean autoFocusedWidget = false;
     public static final LegacyIconHolder iconHolderRenderer = new LegacyIconHolder();
     public static final Identifier MINECRAFT = Legacy4J.createModLocation("textures/gui/title/minecraft.png");
     public static final Identifier PANORAMA_DAY = Legacy4J.createModLocation("textures/gui/title/panorama_day.png");
@@ -457,6 +461,10 @@ public class LegacyRenderUtil {
         return LegacyOptions.legacyItemTooltipScaling.get() && LegacyOptions.getUIMode().isFHD() ? 2 / 3.0f : 1.0f;
     }
 
+    public interface ScaledTooltipPositioner extends ClientTooltipPositioner {
+        float scale();
+    }
+
     public static float getChatSafeZone() {
         return 29 * LegacyOptions.hudDistance.get().floatValue();
     }
@@ -468,6 +476,10 @@ public class LegacyRenderUtil {
     public static boolean canDisplayHUD() {
         int hudDelay = LegacyOptions.hudDelay.get();
         return mc.screen == null && (hudDelay == 0 || Util.getMillis() - LegacyGuiElements.lastGui > hudDelay);
+    }
+
+    public static boolean hasAutoFocusButtonAnimation() {
+        return autoFocusedWidget && CommonValue.AUTOFOCUS_BUTTON_ANIMATION.get();
     }
 
     public static void renderContainerEffects(GuiGraphicsExtractor GuiGraphicsExtractor, int leftPos, int topPos, int imageWidth, int imageHeight, int mouseX, int mouseY) {
@@ -553,7 +565,13 @@ public class LegacyRenderUtil {
             Object2IntMap<Component> tooltipLines = tooltip.stream().limit(LegacyRenderUtil.getSelectedItemTooltipLines()).map(c -> tooltip.indexOf(c) == LegacyRenderUtil.getSelectedItemTooltipLines() - 1 && LegacyOptions.itemTooltipEllipsis.get() ? MORE : c).collect(Collectors.toMap(Function.identity(), font::width, (a, b) -> b, Object2IntLinkedOpenHashMap::new));
             int l = Math.min((int) ((float) GuiAccessor.getInstance().getToolHighlightTimer() * 256.0f / 10.0f), 255);
             if (l > 0) {
-                int color = 0xFFFFFFFF + (Math.round(l * getHUDOpacity()) << 24);
+                int itemNameText = CommonColor.ITEM_NAME_TEXT.get();
+                int itemTooltipText = CommonColor.ITEM_TOOLTIP_TEXT.get();
+                int itemNameColor = (itemNameText & 0x00FFFFFF) | Math.round((itemNameText >>> 24) * l / 255f * getHUDOpacity()) << 24;
+                int itemTooltipColor = (itemTooltipText & 0x00FFFFFF) | Math.round((itemTooltipText >>> 24) * l / 255f * getHUDOpacity()) << 24;
+                int defaultColor = 0x00FFFFFF | Math.round(l * getHUDOpacity()) << 24;
+                boolean overrideItemNameColor = CommonColor.ITEM_NAME_TEXT.isOverridden();
+                boolean overrideItemTooltipColor = CommonColor.ITEM_TOOLTIP_TEXT.isOverridden();
                 int height = LegacyOptions.selectedItemTooltipSpacing.get() * (tooltipLines.size() - 1);
                 GuiGraphicsExtractor.pose().translate(0, -height);
                 if (!mc.options.backgroundForChatOnly().get()) {
@@ -563,9 +581,22 @@ public class LegacyRenderUtil {
                     LegacyRenderUtil.renderPointerPanel(GuiGraphicsExtractor, backgroundX, -4, backgroundWidth, height + 15);
                     FactoryGuiGraphics.of(GuiGraphicsExtractor).clearBlitColor();
                 }
+                int[] line = {0};
                 tooltipLines.forEach((mutableComponent, width) -> {
                     int x = (GuiGraphicsExtractor.guiWidth() - width) / 2;
-                    GuiGraphicsExtractor.text(font, mutableComponent, x, 0, color);
+                    boolean itemNameLine = line[0]++ == 0;
+                    boolean useItemNameColor = itemNameLine && overrideItemNameColor;
+                    boolean useItemTooltipColor = !itemNameLine && overrideItemTooltipColor;
+                    Component text = mutableComponent;
+                    int color = defaultColor;
+                    if (useItemNameColor) {
+                        text = mutableComponent.copy().withStyle(s -> s.withColor(itemNameText & 0x00FFFFFF));
+                        color = itemNameColor;
+                    } else if (useItemTooltipColor) {
+                        text = mutableComponent.copy().withStyle(s -> s.withColor(itemTooltipText & 0x00FFFFFF));
+                        color = itemTooltipColor;
+                    }
+                    GuiGraphicsExtractor.text(font, text, x, 0, color);
                     GuiGraphicsExtractor.pose().translate(0, LegacyOptions.selectedItemTooltipSpacing.get());
                 });
             }
@@ -635,14 +666,15 @@ public class LegacyRenderUtil {
             l += tooltipComponent.getHeight(/*? if >=1.21.2 {*/font/*?}*/);
         }
 
-        Vector2ic vector2ic = clientTooltipPositioner.positionTooltip(graphics.guiWidth(), graphics.guiHeight(), i, j, (int) (k * LegacyRenderUtil.getTooltipScale()), (int) (l * LegacyRenderUtil.getTooltipScale()));
+        float scale = clientTooltipPositioner instanceof ScaledTooltipPositioner scaled ? scaled.scale() : LegacyRenderUtil.getTooltipScale();
+        Vector2ic vector2ic = clientTooltipPositioner.positionTooltip(graphics.guiWidth(), graphics.guiHeight(), i, j, (int) (k * scale), (int) (l * scale));
         int p = vector2ic.x();
         int q = vector2ic.y();
         graphics.pose().pushMatrix();
         if (p == (int) Legacy4JClient.controllerManager.getPointerX() && q == (int) Legacy4JClient.controllerManager.getPointerY())
             graphics.pose().translate((float) (Legacy4JClient.controllerManager.getPointerX() - i), (float) (Legacy4JClient.controllerManager.getPointerY() - j));
-        int scaledWidth = Math.round(LegacyRenderUtil.getTooltipScale() * k);
-        int scaledHeight = Math.round(LegacyRenderUtil.getTooltipScale() * l);
+        int scaledWidth = Math.round(scale * k);
+        int scaledHeight = Math.round(scale * l);
         switch (LegacyOptions.getUIMode()) {
             case FHD -> LegacyRenderUtil.renderPointerPanel(graphics, p - 3, q - 6, scaledWidth + 7, scaledHeight + 9);
             case SD -> LegacyRenderUtil.renderPointerPanel(graphics, p - 3, q - 4, scaledWidth + 7, scaledHeight + 6);
@@ -650,15 +682,24 @@ public class LegacyRenderUtil {
         }
         graphics.pose().translate(p, q);
         FactoryScreenUtil.disableDepthTest();
-        graphics.pose().scale(LegacyRenderUtil.getTooltipScale(), LegacyRenderUtil.getTooltipScale());
+        graphics.pose().scale(scale, scale);
         int s = 0;
 
         int t;
         ClientTooltipComponent tooltipComponent;
-        for (t = 0; t < list.size(); ++t) {
-            tooltipComponent = list.get(t);
-            tooltipComponent.extractText(graphics, font, 0, s);
-            s += tooltipComponent.getHeight(/*? if >=1.21.2 {*/font/*?}*/);
+        try {
+            Integer itemNameText = CommonColor.ITEM_NAME_TEXT.isOverridden() ? CommonColor.ITEM_NAME_TEXT.get() : null;
+            Integer itemTooltipText = CommonColor.ITEM_TOOLTIP_TEXT.isOverridden() ? CommonColor.ITEM_TOOLTIP_TEXT.get() : null;
+            for (t = 0; t < list.size(); ++t) {
+                tooltipComponent = list.get(t);
+                tooltipTextColorOverride = t == 0 ? itemNameText : itemTooltipText;
+                tooltipTextColorOverrideForcesStyle = t == 0 && itemNameText != null;
+                tooltipComponent.extractText(graphics, font, 0, s);
+                s += tooltipComponent.getHeight(/*? if >=1.21.2 {*/font/*?}*/);
+            }
+        } finally {
+            tooltipTextColorOverride = null;
+            tooltipTextColorOverrideForcesStyle = false;
         }
 
         s = 0;
@@ -700,9 +741,33 @@ public class LegacyRenderUtil {
             double d = vec32.horizontalDistanceSqr();
             double e = vec3.horizontalDistanceSqr();
             if (d > 0.0 && e > 0.0) {
-                int dir = (int) -Math.signum(vec32.x * vec3.z - vec32.z * vec3.x);
-                float z = (float) (Math.min(Math.PI / 8, Math.acos((vec32.x * vec3.x + vec32.z * vec3.z) / Math.sqrt(d * e)) / 2.5));
-                if (z > 0) return dir * z;
+                double dot = (vec32.x * vec3.x + vec32.z * vec3.z) / Math.sqrt(d * e);
+                double angle = Math.acos(Mth.clamp(dot, -1.0, 1.0));
+                double z = Math.min(Math.PI / 8, angle / 2.5);
+                if (z > 0.0) {
+                    double dir = -Math.signum(vec32.x * vec3.z - vec32.z * vec3.x);
+                    return (float)(original + dir * z);
+                }
+            }
+        }
+        return original;
+    }
+
+    public static float getFlyingViewYRotation(float original) {
+        if (LegacyOptions.flyingViewRolling.get() && mc.player != null && mc.player.isFallFlying()) {
+            float f = FactoryAPIClient.getGamePartialTick(false);
+            Vec3 vec3 = mc.player.getViewVector(f);
+            Vec3 vec32 = mc.player.avatarState().deltaMovementOnPreviousTick().lerp(mc.player.getDeltaMovement(), f);
+            double d = vec32.horizontalDistanceSqr();
+            double e = vec3.horizontalDistanceSqr();
+            if (d > 0.01 && e > 0.01) {
+                double dot = (vec32.x * vec3.x + vec32.z * vec3.z) / Math.sqrt(d * e);
+                double angle = Math.acos(Mth.clamp(dot, -1.0, 1.0));
+                double forwardAlignment = Mth.clamp(dot, 0.0, 1.0);
+                if (angle > 0.0 && forwardAlignment > 0.0) {
+                    double dir = -Math.signum(vec32.x * vec3.z - vec32.z * vec3.x);
+                    return (float)(original + dir * angle * forwardAlignment * 0.25);
+                }
             }
         }
         return original;
@@ -711,7 +776,7 @@ public class LegacyRenderUtil {
     public static void renderGameOverlay(GuiGraphicsExtractor graphics) {
         if (!MinecraftAccessor.getInstance().hasGameLoaded()) return;
         float partialTick = FactoryAPIClient.getPartialTick();
-        boolean canRenderElement = (mc.screen != null || !mc.options.hideGui);
+        boolean canRenderElement = mc.screen != null || LegacyOptions.displayHUD.get() && !mc.options.hideGui;
         LegacyTip tip = LegacyTipManager.getActualTip();
         if ((!LegacyTipManager.tips.isEmpty() || tip != null) && canRenderElement) {
             if (tip == null) tip = LegacyTipManager.updateTip();

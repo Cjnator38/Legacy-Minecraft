@@ -67,13 +67,15 @@ public class LegacyLoadingRenderer implements Renderable {
                         GuiGraphicsExtractor.text(minecraft.font, loadingStage, stageX, stageY, CommonColor.STAGE_TEXT.get());
                     });
                 }
-                try (SpriteContents contents = FactoryGuiGraphics.getSprites().getSprite(LOADING_BACKGROUND).contents()) {
-                    FactoryGuiGraphics.of(GuiGraphicsExtractor).blitSprite(LOADING_BACKGROUND, loadingBarX, loadingBarY, 320, 320 * contents.height() / contents.width());
+                Identifier loadingBackground = accessor.getElementValue("loadingBar.backgroundSprite", LOADING_BACKGROUND, Identifier.class);
+                Identifier loadingBar = accessor.getElementValue("loadingBar.sprite", LOADING_BAR, Identifier.class);
+                try (SpriteContents contents = FactoryGuiGraphics.getSprites().getSprite(loadingBackground).contents()) {
+                    FactoryGuiGraphics.of(GuiGraphicsExtractor).blitSprite(loadingBackground, loadingBarX, loadingBarY, 320, 320 * contents.height() / contents.width());
                 }
                 if (steppedProgress > 0) {
-                    try (SpriteContents contents = FactoryGuiGraphics.getSprites().getSprite(LOADING_BAR).contents()) {
+                    try (SpriteContents contents = FactoryGuiGraphics.getSprites().getSprite(loadingBar).contents()) {
                         int fillWidth = Math.min(318, Math.round(318.0f * steppedProgress / 100.0f));
-                        FactoryGuiGraphics.of(GuiGraphicsExtractor).blitSprite(LOADING_BAR, 318, 318 * contents.height() / contents.width(), 0, 0, loadingBarX + 1, loadingBarY + 1, 0, fillWidth, 318 * contents.height() / contents.width());
+                        FactoryGuiGraphics.of(GuiGraphicsExtractor).blitSprite(loadingBar, 318, 318 * contents.height() / contents.width(), 0, 0, loadingBarX + 1, loadingBarY + 1, 0, fillWidth, 318 * contents.height() / contents.width());
                     }
                 }
                 LegacyTip tip = Legacy4JClient.legacyTipManager.getLoadingTip();
@@ -84,6 +86,15 @@ public class LegacyLoadingRenderer implements Renderable {
                 }
             }
         } else LegacyRenderUtil.drawGenericLoading(GuiGraphicsExtractor, (width - 75) / 2, height / 2);
+
+        Identifier loadingIcon = accessor.getElementValue("loadingIcon.sprite", null, Identifier.class);
+        if (loadingIcon != null) {
+            int iconWidth = accessor.getInteger("loadingIcon.width", 16);
+            int iconHeight = accessor.getInteger("loadingIcon.height", iconWidth);
+            int iconX = accessor.getInteger("loadingIcon.x", (width - iconWidth) / 2);
+            int iconY = accessor.getInteger("loadingIcon.y", Math.round(accessor.getFloat("loadingHeader.y", height / 2 - 23) - iconHeight - 8));
+            FactoryGuiGraphics.of(GuiGraphicsExtractor).blitSprite(loadingIcon, iconX, iconY, iconWidth, iconHeight);
+        }
 
         if (loadingHeader != null) {
             LegacyFontUtil.applySmallerFont(fontOverride.map(FontDescription.Resource::new).orElse(FontDescription.DEFAULT), b -> {

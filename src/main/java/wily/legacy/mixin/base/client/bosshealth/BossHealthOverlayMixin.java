@@ -7,6 +7,7 @@ import net.minecraft.client.gui.GuiGraphicsExtractor;
 import net.minecraft.client.gui.components.BossHealthOverlay;
 import net.minecraft.network.chat.Component;
 import net.minecraft.resources.Identifier;
+import net.minecraft.util.FormattedCharSequence;
 import net.minecraft.util.Mth;
 import net.minecraft.world.BossEvent;
 import org.spongepowered.asm.mixin.Final;
@@ -18,7 +19,9 @@ import org.spongepowered.asm.mixin.injection.ModifyVariable;
 import org.spongepowered.asm.mixin.injection.Redirect;
 import org.spongepowered.asm.mixin.injection.callback.CallbackInfo;
 import wily.factoryapi.base.client.FactoryGuiGraphics;
+import wily.factoryapi.util.ColorUtil;
 import wily.factoryapi.util.FactoryScreenUtil;
+import wily.legacy.client.CommonColor;
 import wily.legacy.client.LegacyOptions;
 import wily.legacy.util.client.LegacyFontUtil;
 import wily.legacy.util.client.LegacyRenderUtil;
@@ -37,10 +40,23 @@ public abstract class BossHealthOverlayMixin {
             graphics.pose().translate(graphics.guiWidth() / 2f, j);
             if (!b) graphics.pose().scale(2 / 3f, 2 / 3f);
             graphics.pose().translate(-font.width(component) / 2f, 0);
-            graphics.text(font, component, 0, 0, k);
+            if (CommonColor.BOSS_TEXT.isOverridden()) {
+                graphics.text(font, bossNameText(component), 0, 0, bossTextColor(CommonColor.BOSS_TEXT.get()), false);
+            } else {
+                graphics.text(font, component, 0, 0, bossTextColor(k));
+            }
             graphics.pose().popMatrix();
             LegacyFontUtil.forceVanillaFontShadowColor = false;
         });
+    }
+
+    private static int bossTextColor(int color) {
+        return ColorUtil.withAlpha(color, LegacyRenderUtil.getHUDOpacity());
+    }
+
+    private static FormattedCharSequence bossNameText(Component component) {
+        int color = CommonColor.BOSS_TEXT.get() & 0x00FFFFFF;
+        return sink -> component.getVisualOrderText().accept((index, style, codePoint) -> sink.accept(index, style.withColor(color), codePoint));
     }
 
     //? if >1.20.1 {

@@ -42,20 +42,31 @@ import net.minecraft.world.MenuProvider;
 import net.minecraft.world.entity.*;
 import net.minecraft.world.entity.animal.*;
 import net.minecraft.world.entity.animal.allay.Allay;
-import net.minecraft.world.entity.animal.cow.Cow;
+import net.minecraft.world.entity.animal.armadillo.Armadillo;
+import net.minecraft.world.entity.animal.cow.AbstractCow;
+import net.minecraft.world.entity.animal.cow.MushroomCow;
+import net.minecraft.world.entity.animal.dolphin.Dolphin;
+import net.minecraft.world.entity.animal.equine.AbstractChestedHorse;
 import net.minecraft.world.entity.animal.equine.AbstractHorse;
 import net.minecraft.world.entity.animal.equine.Horse;
 import net.minecraft.world.entity.animal.equine.Llama;
 import net.minecraft.world.entity.animal.feline.Cat;
 import net.minecraft.world.entity.animal.golem.IronGolem;
 import net.minecraft.world.entity.animal.golem.SnowGolem;
+import net.minecraft.world.entity.animal.happyghast.HappyGhast;
+//? if >=1.21.11 {
+import net.minecraft.world.entity.animal.nautilus.AbstractNautilus;
+//?}
 import net.minecraft.world.entity.animal.panda.Panda;
 import net.minecraft.world.entity.animal.parrot.Parrot;
 import net.minecraft.world.entity.animal.pig.Pig;
 import net.minecraft.world.entity.animal.sheep.Sheep;
 import net.minecraft.world.entity.animal.wolf.Wolf;
 import net.minecraft.world.entity.decoration.*;
+import net.minecraft.world.entity.monster.Creeper;
+import net.minecraft.world.entity.monster.Shulker;
 import net.minecraft.world.entity.monster.piglin.Piglin;
+import net.minecraft.world.entity.monster.zombie.ZombieVillager;
 import net.minecraft.world.entity.npc.villager.AbstractVillager;
 import net.minecraft.world.entity.npc.villager.Villager;
 import net.minecraft.world.entity.npc.villager.VillagerProfession;
@@ -77,6 +88,7 @@ import net.minecraft.world.item.enchantment.EnchantmentHelper;
 import net.minecraft.world.level.ClipContext;
 import net.minecraft.world.level.block.*;
 import net.minecraft.world.level.block.entity.*;
+import net.minecraft.world.level.block.entity.vault.VaultState;
 import net.minecraft.world.level.block.state.BlockState;
 import net.minecraft.world.level.block.state.properties.BlockStateProperties;
 import net.minecraft.world.level.material.Fluids;
@@ -84,6 +96,7 @@ import net.minecraft.world.phys.AABB;
 import net.minecraft.world.phys.BlockHitResult;
 import net.minecraft.world.phys.EntityHitResult;
 import net.minecraft.world.phys.HitResult;
+import net.minecraft.world.phys.Vec3;
 import org.jetbrains.annotations.Nullable;
 import org.lwjgl.glfw.GLFW;
 import wily.factoryapi.FactoryEvent;
@@ -147,6 +160,7 @@ public interface ControlTooltip {
     ArbitrarySupplier<ComponentIcon> CONTROL_TYPE = registerCommonComponentIcon("control_type", () -> ControlType.getActiveType().isKbm() ? CompoundComponentIcon.of(ControlTooltip.getKeyIcon(InputConstants.KEY_LSHIFT), ControlTooltip.PLUS_ICON, CompoundComponentIcon.of(ControlTooltip.getKeyIcon(InputConstants.KEY_LBRACKET), ControlTooltip.SPACE_ICON, ControlTooltip.getKeyIcon(InputConstants.KEY_RBRACKET))) : CompoundComponentIcon.of(ControllerBinding.LEFT_TRIGGER.getIcon(), ControlTooltip.SPACE_ICON, ControllerBinding.RIGHT_TRIGGER.getIcon()));
     ArbitrarySupplier<ComponentIcon> LEFT_CRAFTING_TYPE = registerCommonComponentIcon("left_crafting_type", () -> ControlType.getActiveType().isKbm() ? CompoundComponentIcon.of(getKeyIcon(InputConstants.KEY_LSHIFT), PLUS_ICON, getKeyIcon(InputConstants.KEY_LBRACKET)) : ControllerBinding.LEFT_TRIGGER.getIcon());
     ArbitrarySupplier<ComponentIcon> RIGHT_CRAFTING_TYPE = registerCommonComponentIcon("right_crafting_type", () -> ControlType.getActiveType().isKbm() ? CompoundComponentIcon.of(getKeyIcon(InputConstants.KEY_LSHIFT), PLUS_ICON, getKeyIcon(InputConstants.KEY_RBRACKET)) : ControllerBinding.RIGHT_TRIGGER.getIcon());
+    ArbitrarySupplier<ComponentIcon> BUNDLE_SELECTION = registerCommonComponentIcon("bundle_selection", () -> ControlType.getActiveType().isKbm() ? CompoundComponentIcon.of(getKeyIcon(InputConstants.KEY_1), SPACE_ICON, getKeyIcon(InputConstants.KEY_9), SPACE_ICON, getKbmIcon(MOUSE_BASE_CHAR)) : ControllerBinding.RIGHT_STICK.getIcon());
     ArbitrarySupplier<ComponentIcon> PRESS = registerCommonComponentIcon("press", () -> ControlType.getActiveType().isKbm() ? getKeyIcon(InputConstants.KEY_RETURN) : ControllerBinding.DOWN_BUTTON.getIcon());
     ArbitrarySupplier<ComponentIcon> OPTION = registerCommonComponentIcon("option", () -> ControlType.getActiveType().isKbm() ? getKeyIcon(InputConstants.KEY_O) : ControllerBinding.UP_BUTTON.getIcon());
     ArbitrarySupplier<ComponentIcon> EXTRA = registerCommonComponentIcon("extra", () -> ControlType.getActiveType().isKbm() ? getKeyIcon(InputConstants.KEY_X) : ControllerBinding.LEFT_BUTTON.getIcon());
@@ -238,7 +252,7 @@ public interface ControlTooltip {
             } else {
                 if (a.getHoveredSlot().hasItem() && Legacy4JClient.hasModOnServer() && LegacyItemUtil.canRepair(a.getHoveredSlot().getItem(), a.getMenu().getCarried()))
                     return LegacyComponents.REPAIR;
-                if (a.getHoveredSlot().hasItem() && Legacy4JClient.hasModOnServer() && LegacyItemUtil.isDyeableItem(a.getHoveredSlot().getItem().typeHolder()) && a.getMenu().getCarried().getItem() instanceof DyeItem)
+                if (a.getHoveredSlot().hasItem() && Legacy4JClient.hasModOnServer() && LegacyItemUtil.isDyeableItem(a.getHoveredSlot().getItem().typeHolder()) && LegacyItemUtil.getDyeColorOrNull(a.getMenu().getCarried().getItem()) != null)
                     return LegacyComponents.DYE;
                 else if (isBundle(a.getMenu().getCarried()) && BundleItem.getFullnessDisplay(a.getMenu().getCarried()) > 0 && !a.getHoveredSlot().hasItem())
                     return LegacyComponents.RELEASE;
@@ -329,7 +343,11 @@ public interface ControlTooltip {
     }
 
     static Component getUseAction(Minecraft minecraft) {
-        return minecraft.player != null && isSpear(minecraft.player.getMainHandItem()) ? LegacyComponents.CHARGE : getActualUse(minecraft);
+        if (minecraft.player == null) return null;
+        Component action = getActualUse(minecraft);
+        if (isSpear(minecraft.player.getMainHandItem()) && action != LegacyComponents.EQUIP)
+            return LegacyComponents.CHARGE;
+        return action;
     }
 
     static Component getAttackAction(Minecraft minecraft) {
@@ -341,6 +359,8 @@ public interface ControlTooltip {
             return null;
         if (minecraft.hitResult instanceof BlockHitResult r && r.getType() != HitResult.Type.MISS) {
             BlockState state = minecraft.level.getBlockState(r.getBlockPos());
+            if (minecraft.player.getAbilities().instabuild && minecraft.player.getMainHandItem().is(ItemTags.SWORDS))
+                return null;
             if (state.getBlock() instanceof NoteBlock && !minecraft.player.getAbilities().instabuild)
                 return LegacyComponents.PLAY;
             else if ((minecraft.player.getAbilities().instabuild || state.getBlock().defaultDestroyTime() >= 0 && !minecraft.player.blockActionRestricted(minecraft.level, r.getBlockPos(), minecraft.gameMode.getPlayerMode())))
@@ -361,7 +381,13 @@ public interface ControlTooltip {
         if (minecraft.player.isSleeping()) return LegacyComponents.WAKE_UP;
         if (minecraft.hitResult instanceof EntityHitResult r && (r.getEntity() instanceof AbstractVillager m && (!(m instanceof Villager v) || /*? if <1.21.5 {*//*v.getVillagerData().getProfession() != VillagerProfession.NONE*//*?} else {*/!v.getVillagerData().profession().is(VillagerProfession.NONE)/*?}*/) && !m.isTrading()))
             return LegacyComponents.TRADE;
-        if (entity instanceof ItemFrame itemFrame && !itemFrame.getItem().isEmpty()) return LegacyComponents.ROTATE;
+        if (entity instanceof ItemFrame itemFrame) {
+            if (!itemFrame.getItem().isEmpty())
+                return LegacyComponents.ROTATE;
+            if (!mainHand.isEmpty() || !minecraft.player.getOffhandItem().isEmpty())
+                return LegacyComponents.PLACE;
+            return null;
+        }
         if (entity instanceof LeashFenceKnotEntity knot) {
             BlockPos fencePos = knot.getPos();
             if (!minecraft.level.getEntities((Entity) null, new AABB(fencePos).inflate(8.0D), e -> (e instanceof Mob mob && mob.getLeashHolder() == minecraft.player) || e instanceof Boat boat && boat.getLeashHolder() == minecraft.player || e instanceof ChestBoat chestBoat && chestBoat.getLeashHolder() == minecraft.player).isEmpty())
@@ -369,6 +395,8 @@ public interface ControlTooltip {
             return LegacyComponents.DETACH;
         }
         if (minecraft.hitResult instanceof EntityHitResult r && r.getEntity() instanceof ArmorStand stand) {
+            if (minecraft.player.isShiftKeyDown())
+                return LegacyComponents.CHANGE_POSE;
             double hitY = r.getLocation().y - stand.getY();
             return mainHand.isEmpty() ? switch ((int) (hitY * 10)) {
                 case 16, 17, 18, 19 -> !stand.getItemBySlot(EquipmentSlot.HEAD).isEmpty() ? LegacyComponents.TAKE : null;
@@ -390,9 +418,23 @@ public interface ControlTooltip {
             if (entity != null)
                 return null;
         }
+        if (entity instanceof Creeper creeper && !creeper.isIgnited())
+            for (InteractionHand hand : InteractionHand.values())
+                if (minecraft.player.getItemInHand(hand).is(Items.FLINT_AND_STEEL))
+                    return LegacyComponents.IGNITE;
+        //? if >=1.21.11 {
+        if (entity instanceof AbstractNautilus nautilus && canOpenNautilusInventory(minecraft, nautilus))
+            return LegacyComponents.OPEN;
+        if (entity instanceof AbstractNautilus nautilus) {
+            if (canEquipNautilus(nautilus, mainHand, EquipmentSlot.SADDLE))
+                return LegacyComponents.SADDLE;
+            if (canEquipNautilus(nautilus, mainHand, EquipmentSlot.BODY))
+                return LegacyComponents.EQUIP;
+        }
+        //?}
         if (entity instanceof Wolf wolf && wolf.isTame() && mainHand.has(DataComponents.EQUIPPABLE) && mainHand.get(DataComponents.EQUIPPABLE).slot() == EquipmentSlot.BODY && wolf.getItemBySlot(EquipmentSlot.BODY).isEmpty()) 
             return LegacyComponents.EQUIP;
-        if (entity instanceof TamableAnimal a && a.isTame() && a.isOwnedBy(minecraft.player) && (!canDyeEntity(minecraft, minecraft.player.getMainHandItem()) && !canDyeEntity(minecraft, minecraft.player.getOffhandItem())) && (!(a instanceof Parrot p) || (p.onGround() && !minecraft.player.isPassenger())))
+        if (entity instanceof TamableAnimal a && a.isTame() && a.isOwnedBy(minecraft.player)/*? if >=1.21.11 {*/ && !(a instanceof AbstractNautilus)/*?}*/ && (!canDyeEntity(minecraft, minecraft.player.getMainHandItem()) && !canDyeEntity(minecraft, minecraft.player.getOffhandItem())) && (!(a instanceof Parrot p) || (p.onGround() && !minecraft.player.isPassenger())))
             return a.isInSittingPose() ? LegacyComponents.FOLLOW_ME : LegacyComponents.SIT;
         if (entity instanceof Allay allay) {
             ItemStack allayItem = allay.getItemInHand(InteractionHand.MAIN_HAND);
@@ -402,6 +444,8 @@ public interface ControlTooltip {
             if (allayItem.isEmpty() && !main.isEmpty() && !main.is(Items.LEAD))
                 return LegacyComponents.GIVE;
         }
+        if (entity instanceof AbstractChestedHorse horse && mainHand.is(Items.CHEST) && horse.isTamed() && !horse.hasChest() && !horse.isVehicle() && !minecraft.player.isSecondaryUseActive())
+            return LegacyComponents.ATTACH_CHEST;
         if (entity != null && entity.getType() == EntityType.COMMAND_BLOCK_MINECART) {
             if (minecraft.player.canUseGameMasterBlocks())
                 return LegacyComponents.EDIT;
@@ -410,10 +454,22 @@ public interface ControlTooltip {
             return LegacyComponents.OPEN;
         if (entity instanceof MinecartChest || entity instanceof MinecartHopper)
             return LegacyComponents.OPEN;
-        if (entity instanceof ChestBoat && minecraft.player.isShiftKeyDown())
+        if (entity instanceof ChestBoat && minecraft.player.isSecondaryUseActive())
             return LegacyComponents.OPEN;
+        if (entity instanceof HappyGhast ghast && mainHand.is(ItemTags.HARNESSES) && ghast.canUseSlot(EquipmentSlot.BODY) && ghast.getItemBySlot(EquipmentSlot.BODY).isEmpty())
+            return LegacyComponents.HARNESS;
         if (/*? if <1.21.5 {*//*MainHand.getItem() instanceof SaddleItem && *//*?}*/minecraft.hitResult instanceof EntityHitResult r && r.getEntity() instanceof /*? if <1.21.5 {*//*Saddleable*//*?} else {*/ Mob/*?}*/ s &&/*? if <1.21.5 {*//*s.isSaddleable()*//*?} else {*/s.isEquippableInSlot(mainHand, EquipmentSlot.SADDLE)/*?}*/ && !s.isSaddled() && (!(s instanceof AbstractHorse h) || h.isTamed())) {
             return LegacyComponents.SADDLE;
+        }
+        if (entity instanceof LivingEntity living && mainHand.getItem() instanceof ShearsItem) {
+            if (canShearEquipment(living, EquipmentSlot.BODY) && living.getItemBySlot(EquipmentSlot.BODY).is(ItemTags.HARNESSES))
+                return LegacyComponents.REMOVE_HARNESS;
+            //? if >=1.21.11 {
+            if (living instanceof AbstractNautilus && canShearEquipment(living, EquipmentSlot.BODY))
+                return LegacyComponents.REMOVE_ARMOR;
+            //?}
+            if (canShearEquipment(living, EquipmentSlot.SADDLE))
+                return LegacyComponents.REMOVE_SADDLE;
         }
         if (minecraft.hitResult instanceof EntityHitResult r) {
             if (entity instanceof AbstractHorse h && h.isTamed() && !mainHand.is(Items.SADDLE) && mainHand.has(DataComponents.EQUIPPABLE) && mainHand.get(DataComponents.EQUIPPABLE).slot().equals(EquipmentSlot.BODY) && h.isEquippableInSlot(mainHand, EquipmentSlot.BODY) && h.getItemBySlot(EquipmentSlot.BODY).isEmpty())
@@ -427,12 +483,15 @@ public interface ControlTooltip {
                 if (entity instanceof Boat || entity instanceof ChestBoat) return LegacyComponents.SAIL;
                 else if (entity instanceof AbstractMinecart m && /*? if <1.21.2 {*//*m.getMinecartType() == AbstractMinecart.Type.RIDEABLE*//*?} else {*/m.isRideable()/*?}*/)
                     return LegacyComponents.RIDE;
-                else if (entity instanceof /*? if <1.21.5 {*//*Saddleable*//*?} else {*/ Mob/*?}*/ s && !entity.isVehicle() && ((!(entity instanceof AbstractHorse) && s.isSaddled()) || entity instanceof AbstractHorse h && !minecraft.player.isSecondaryUseActive() && (h.isTamed() && !h.isFood(minecraft.player.getMainHandItem()) || minecraft.player.getMainHandItem().isEmpty())))
+                else if ((entity instanceof HappyGhast ghast && !entity.isVehicle() && !ghast.getItemBySlot(EquipmentSlot.BODY).isEmpty()) || entity instanceof /*? if <1.21.5 {*//*Saddleable*//*?} else {*/ Mob/*?}*/ s && !entity.isVehicle() && ((!(entity instanceof AbstractHorse) && s.isSaddled()) || entity instanceof AbstractHorse h && !minecraft.player.isSecondaryUseActive() && (h.isTamed() && !h.isFood(minecraft.player.getMainHandItem()) || minecraft.player.getMainHandItem().isEmpty())))
                     return LegacyComponents.MOUNT;
             }
         }
         if (blockState != null && blockState.getBlock() instanceof BedBlock) return LegacyComponents.SLEEP;
         if (blockState != null && blockState.getBlock() instanceof NoteBlock) return LegacyComponents.CHANGE_PITCH;
+        if (blockState != null && blockState.getBlock() instanceof RedStoneOreBlock) return LegacyComponents.USE;
+        if (blockState != null && (blockState.getBlock() instanceof RepeaterBlock || blockState.getBlock() instanceof ComparatorBlock || blockState.getBlock() instanceof RedStoneWireBlock))
+            return LegacyComponents.USE;
         if (blockState != null && blockState.getBlock() instanceof ComposterBlock && blockState.getValue(ComposterBlock.LEVEL) == 8)
             return LegacyComponents.COLLECT;
         if (blockState != null && blockState.getBlock() instanceof JukeboxBlock && blockState.getValue(HAS_RECORD))
@@ -459,6 +518,15 @@ public interface ControlTooltip {
                 }
             }
         }
+        if (blockHit != null && blockState != null && blockState.getBlock() instanceof ShelfBlock shelf && minecraft.level.getBlockEntity(blockHit.getBlockPos()) instanceof ShelfBlockEntity shelfEntity) {
+            OptionalInt slot = shelf.getHitSlot(blockHit, blockState.getValue(ShelfBlock.FACING));
+            if (slot.isPresent()) {
+                ItemStack item = shelfEntity.getItem(slot.getAsInt());
+                if (mainHand.isEmpty())
+                    return item.isEmpty() ? null : LegacyComponents.TAKE;
+                return item.isEmpty() ? LegacyComponents.PLACE : LegacyComponents.SWAP;
+            }
+        }
         if (blockState != null) {
             for (InteractionHand hand : InteractionHand.values()) {
                 ItemStack item = minecraft.player.getItemInHand(hand);
@@ -467,9 +535,14 @@ public interface ControlTooltip {
                 if (item.getItem() instanceof AxeItem && (HoneycombItem.WAX_OFF_BY_BLOCK.get().containsKey(blockState.getBlock()) || WeatheringCopper.getPrevious(blockState).isPresent()))
                     return LegacyComponents.SCRAPE;
             }
+            if (blockState.is(BlockTags.COPPER_GOLEM_STATUES) && !mainHand.is(ItemTags.AXES))
+                return LegacyComponents.CHANGE_POSE;
         }
         if (blockHit != null && blockState != null && (blockState.getBlock() instanceof SignBlock || blockState.getBlock() instanceof CeilingHangingSignBlock || blockState.getBlock() instanceof WallHangingSignBlock)) {
             if (minecraft.level.getBlockEntity(blockHit.getBlockPos()) instanceof SignBlockEntity sign) {
+                for (InteractionHand hand : InteractionHand.values())
+                    if (minecraft.player.getItemInHand(hand).is(Items.HONEYCOMB) && !sign.isWaxed())
+                        return LegacyComponents.WAX;
                 SignText text = sign.isFacingFrontText(minecraft.player) ? sign.getFrontText() : sign.getBackText();
                 boolean empty = true;
                 for (int i = 0; i < 4; i++)
@@ -484,14 +557,25 @@ public interface ControlTooltip {
                         return LegacyComponents.GLOW;
                     if (item.is(Items.INK_SAC) && text.hasGlowingText())
                         return LegacyComponents.REMOVE_GLOW;
-                    if (item.getItem() instanceof DyeItem dye && text.getColor() != LegacyItemUtil.getDyeColor(dye.asItem()))
+                    if (LegacyItemUtil.getDyeColorOrNull(item.getItem()) != null && text.getColor() != LegacyItemUtil.getDyeColor(item.getItem()))
                         return LegacyComponents.DYE;
                 }
             }
             return LegacyComponents.EDIT;
         }
-        if (blockHit != null && blockState != null && blockState.getBlock() instanceof CakeBlock && (minecraft.player.getAbilities().instabuild || minecraft.player.getFoodData().getFoodLevel() < 20))
+        if (blockState != null && blockState.getBlock() instanceof CandleCakeBlock && CandleCakeBlock.canLight(blockState)) {
+            for (InteractionHand hand : InteractionHand.values()) {
+                ItemStack item = minecraft.player.getItemInHand(hand);
+                if (item.getItem() instanceof FlintAndSteelItem || item.getItem() instanceof FireChargeItem)
+                    return LegacyComponents.IGNITE;
+            }
+        }
+        if (blockHit != null && blockState != null && (blockState.getBlock() instanceof CakeBlock || blockState.getBlock() instanceof CandleCakeBlock) && (minecraft.player.getAbilities().instabuild || minecraft.player.getFoodData().getFoodLevel() < 20))
             return LegacyComponents.EAT;
+        if (blockState != null && canHarvestSweetBerries(blockState, minecraft.player))
+            return LegacyComponents.HARVEST;
+        if (blockState != null && canHarvestGlowBerries(blockState))
+            return LegacyComponents.HARVEST;
         if (blockHit != null && blockState != null && minecraft.player.canUseGameMasterBlocks()) {
             if (blockState.getBlock() instanceof CommandBlock)
                 return LegacyComponents.EDIT;
@@ -504,6 +588,9 @@ public interface ControlTooltip {
             if (planted != Blocks.AIR && minecraft.player.getMainHandItem().isEmpty() && minecraft.player.getOffhandItem().isEmpty())
             return LegacyComponents.COLLECT;
         }
+        Component potAction = getDecoratedPotAction(minecraft, blockHit, blockState);
+        if (potAction != null)
+            return potAction;
         if (blockState != null && (blockState.getBlock() instanceof DoorBlock || blockState.getBlock() instanceof TrapDoorBlock || blockState.getBlock() instanceof FenceGateBlock))
             return blockState.getValue(BlockStateProperties.OPEN) ? LegacyComponents.CLOSE : LegacyComponents.OPEN;
         if (blockState != null && (blockState.getBlock() instanceof ButtonBlock || blockState.getBlock() instanceof LeverBlock || blockState.getBlock() instanceof EnderChestBlock || blockState.getMenuProvider(minecraft.level, blockHit.getBlockPos()) != null || minecraft.level.getBlockEntity(blockHit.getBlockPos()) instanceof MenuProvider))
@@ -523,10 +610,14 @@ public interface ControlTooltip {
             if (blockState != null && blockState.getBlock() instanceof RespawnAnchorBlock && actualItem.is(Items.GLOWSTONE) && blockState.getValue(RespawnAnchorBlock.CHARGE) < 4)
                 return LegacyComponents.CHARGE;
             // 2-Special block-item interactions (Jukebox, Beehive, Cauldron, Lodestone, Flower Pot)
+            if (canUnlockVault(blockState, actualItem))
+                return LegacyComponents.UNLOCK;
             if (blockState != null && blockState.getBlock() instanceof JukeboxBlock && actualItem.has(DataComponents.JUKEBOX_PLAYABLE))
                 return LegacyComponents.PLAY;
             if (blockState != null && blockState.getBlock() instanceof BeehiveBlock && actualItem.is(Items.GLASS_BOTTLE) && blockState.getValue(BeehiveBlock.HONEY_LEVEL) >= 5)
                 return LegacyComponents.COLLECT;
+            if (blockState != null && blockState.getBlock() instanceof BeehiveBlock && actualItem.is(Items.SHEARS) && blockState.getValue(BeehiveBlock.HONEY_LEVEL) >= 5)
+                return LegacyComponents.SHEAR;
             if (actualItem.is(Items.GLASS_BOTTLE)) {
                 BlockHitResult hit = Item.getPlayerPOVHitResult( minecraft.level, minecraft.player, ClipContext.Fluid.SOURCE_ONLY);
                 if (hit.getType() == HitResult.Type.BLOCK && minecraft.level.getFluidState(hit.getBlockPos()).is(FluidTags.WATER))
@@ -549,10 +640,15 @@ public interface ControlTooltip {
                 boolean isPowderBucket = actualItem.is(Items.POWDER_SNOW_BUCKET);
                 boolean isLavaBucket = actualItem.is(Items.LAVA_BUCKET);
                 boolean isOtherPotion = (actualItem.is(Items.POTION) || actualItem.is(Items.SPLASH_POTION) || actualItem.is(Items.LINGERING_POTION)) && !isWaterBottle;
+                boolean isArrow = actualItem.is(Items.ARROW);
                 WaterCauldronBlockEntity be = null;
                 if (blockHit != null && minecraft.level.getBlockEntity(blockHit.getBlockPos()) instanceof WaterCauldronBlockEntity wbe) be = wbe;
                 int level = blockState.hasProperty(LayeredCauldronBlock.LEVEL) ? blockState.getValue(LayeredCauldronBlock.LEVEL) : 0;
                 boolean isDyed = be != null && be.waterColor != null;
+                if (isDyed && (isWaterBottle || isWaterBucket))
+                    return LegacyComponents.FLUSH;
+                if (isArrow && be != null && !be.hasWater() && level > 0)
+                    return actualItem.getCount() > 1 ? LegacyComponents.TIP_ARROWS : LegacyComponents.TIP_ARROW;
                 if (isEmptyBottle && block == Blocks.WATER_CAULDRON && !isDyed && level > 0)
                     return LegacyComponents.COLLECT;
                 if (isEmptyBucket) {
@@ -582,12 +678,12 @@ public interface ControlTooltip {
                 boolean dyedItem = LegacyItemUtil.isDyedItem(actualItem);
                 boolean isDyeable = LegacyItemUtil.isDyeableItem(actualItem.typeHolder());
                 if (isDyeable) {
-                    if (be.waterColor == null && !dyedItem)
-                        return LegacyComponents.CLEAR;
+                    if (be.waterColor == null && dyedItem)
+                        return LegacyComponents.CLEAN;
                     if (be.waterColor != null)
                         return LegacyComponents.DYE;
                 }
-                if (actualItem.getItem() instanceof DyeItem)
+                if (LegacyItemUtil.getDyeColorOrNull(actualItem.getItem()) != null)
                     return LegacyComponents.MIX;
             }
             if (blockState != null && blockState.getBlock() == Blocks.LODESTONE && actualItem.is(Items.COMPASS))
@@ -603,6 +699,8 @@ public interface ControlTooltip {
                 return null;
             }
             // 3-Interactions with specific entities (Piglin barter, bucket, bucketable mobs, cow for milk)
+            if (entity instanceof ZombieVillager zombieVillager && actualItem.is(Items.GOLDEN_APPLE) && !zombieVillager.isConverting())
+                return LegacyComponents.CURE;
             if (entity instanceof Piglin piglin && actualItem.is(Items.GOLD_INGOT) && !piglin.isBaby() && piglin.getOffhandItem().isEmpty())
                 return LegacyComponents.BARTER;
             Set<EntityType<?>> bucketable = Set.of(EntityType.AXOLOTL, EntityType.COD, EntityType.SALMON, EntityType.TROPICAL_FISH, EntityType.PUFFERFISH, EntityType.TADPOLE);
@@ -617,22 +715,28 @@ public interface ControlTooltip {
                         return LegacyComponents.EMPTY;
                 } else if (state.getBlock() instanceof BucketPickup && !state.getFluidState().isEmpty()) return LegacyComponents.COLLECT;
             }
-            if (actualItem.is(Items.BUCKET) && entity instanceof Cow)
+            if (actualItem.is(Items.BOWL) && entity instanceof MushroomCow mushroomCow && !mushroomCow.isBaby())
+                return LegacyComponents.MILK;
+            if (actualItem.is(Items.BUCKET) && entity instanceof AbstractCow cow && !cow.isBaby())
                 return LegacyComponents.MILK;
             if (entity instanceof MinecartFurnace && actualItem.is(ItemTags.COALS)) return LegacyComponents.FUEL;
             // 4-Placement/Terrain modification (canPlace, canHang, canTill, strip bark, dig path)
-            if (canPlace(minecraft, actualItem, hand))
+            if (canPlace(minecraft, actualItem, hand) || actualItem.getItem() instanceof BoatItem && canPlaceBoat(minecraft)) {
+                if (actualItem.getItem() instanceof BlockItem b && b.getBlock() instanceof LanternBlock && isHangingLanternPlacement(minecraft, actualItem, hand))
+                    return LegacyComponents.HANG;
                 return actualItem.getItem() instanceof BlockItem b && isPlant(b.getBlock()) ? LegacyComponents.PLANT : LegacyComponents.PLACE;
+            }
             if (canHang(minecraft, blockHit, blockState, actualItem)) return LegacyComponents.HANG;
             if (canTill(minecraft, hand, actualItem)) return LegacyComponents.TILL;
             if (actualItem.getItem() instanceof AxeItem && blockState != null && AxeItem.STRIPPABLES.get(blockState.getBlock()) != null && !(hand.equals(InteractionHand.MAIN_HAND) && minecraft.player.getOffhandItem().is(Items.SHIELD) && !minecraft.player.isSecondaryUseActive()))
                 return LegacyComponents.PEEL_BARK;
             if (actualItem.getItem() instanceof ShovelItem && blockState != null && minecraft.level.getBlockState(blockHit.getBlockPos().above()).isAir() && ShovelItem.FLATTENABLES.get(blockState.getBlock()) != null)
                 return LegacyComponents.DIG_PATH;
-            if (actualItem.is(Items.LILY_PAD))
-                return (minecraft.hitResult instanceof BlockHitResult hit && minecraft.level.getFluidState(hit.getBlockPos()).is(FluidTags.WATER)) ? LegacyComponents.PLACE : null;
+            if (actualItem.is(Items.LILY_PAD) || actualItem.is(Items.FROGSPAWN))
+                return canPlaceOnWater(minecraft, actualItem) ? LegacyComponents.PLACE : null;
             // 5-Feeding/healing interactions (canFeed, canSetLoveMode, heal, tame)
             if (canTame(minecraft, hand, actualItem)) return LegacyComponents.TAME;
+            if (canDyeCollar(minecraft, actualItem)) return LegacyComponents.DYE_COLLAR;
             if (canDyeEntity(minecraft, actualItem)) return LegacyComponents.DYE;
             if (canFeed(minecraft, entity, actualItem) || canFeedWithGoldenDandelion(entity, actualItem)) return LegacyComponents.FEED;
             if (canSetLoveMode(entity, actualItem)) return LegacyComponents.LOVE_MODE;
@@ -642,13 +746,19 @@ public interface ControlTooltip {
                 return LegacyComponents.REPAIR;
             // 6-Tool use (shears, brush, bone meal)
             if (actualItem.getItem() instanceof ShearsItem) {
-                if (entity instanceof Sheep s && !s.isBaby() && !s.isSheared() || entity instanceof SnowGolem snowGolem && snowGolem.hasPumpkin())
+                if (entity instanceof Shearable shearable && shearable.readyForShearing() || entity instanceof SnowGolem snowGolem && snowGolem.hasPumpkin())
                     return LegacyComponents.SHEAR;
                 else if (blockState != null && blockState.getBlock() instanceof PumpkinBlock)
                     return LegacyComponents.CARVE;
+                else if (canShearPlant(blockState))
+                    return LegacyComponents.SHEAR;
             }
-            if (blockState != null && actualItem.getItem() instanceof BrushItem && blockState.getBlock() instanceof BrushableBlock)
-                return LegacyComponents.BRUSH;
+            if (actualItem.getItem() instanceof BrushItem) {
+                if (entity instanceof Armadillo armadillo && !armadillo.isBaby())
+                    return LegacyComponents.BRUSH;
+                if (blockState != null && blockState.getBlock() instanceof BrushableBlock)
+                    return LegacyComponents.BRUSH;
+            }
             if (blockHit != null && actualItem.getItem() instanceof BoneMealItem && blockState.getBlock() instanceof BonemealableBlock b && b.isValidBonemealTarget(minecraft.level, blockHit.getBlockPos(), blockState/*? if <=1.20.2 {*//*,true*//*?}*/))
                 return LegacyComponents.GROW;
             // 7-Equipable items (armor, saddle, lead)
@@ -672,11 +782,15 @@ public interface ControlTooltip {
                 return LegacyComponents.NAME;
             // 8-Projection items (bow, crossbow, trident, snowball, egg)
             if (actualItem.getItem() instanceof TridentItem) {
-                if (minecraft.player.getUseItem() == actualItem) return LegacyComponents.THROW;
-                else if (EnchantmentHelper./*? if <1.20.5 {*//*getRiptide(actualItem)*//*?} else {*/getTridentSpinAttackStrength(actualItem, minecraft.player)/*?}*/ <= 0.0F || minecraft.player.isInWaterOrRain())
+                float riptide = EnchantmentHelper./*? if <1.20.5 {*//*getRiptide(actualItem)*//*?} else {*/getTridentSpinAttackStrength(actualItem, minecraft.player)/*?}*/;
+                if (minecraft.player.getUseItem() == actualItem) {
+                    if (riptide > 0.0F)
+                        return minecraft.player.getTicksUsingItem() >= 10 ? LegacyComponents.DASH : LegacyComponents.CHARGE;
+                    return LegacyComponents.THROW;
+                } else if (riptide <= 0.0F || minecraft.player.isInWaterOrRain())
                     return LegacyComponents.CHARGE;
             }
-            if (actualItem.getItem() instanceof EggItem || actualItem.getItem() instanceof SnowballItem || actualItem.getItem() instanceof EnderpearlItem || actualItem.getItem() instanceof EnderEyeItem || actualItem.getItem() instanceof ThrowablePotionItem || actualItem.getItem() instanceof ExperienceBottleItem)
+            if (actualItem.getItem() instanceof EggItem || actualItem.getItem() instanceof SnowballItem || actualItem.getItem() instanceof EnderpearlItem || actualItem.getItem() instanceof EnderEyeItem || actualItem.getItem() instanceof ThrowablePotionItem || actualItem.getItem() instanceof ExperienceBottleItem || actualItem.getItem() instanceof WindChargeItem)
                 return LegacyComponents.THROW;
             if (actualItem.getItem() instanceof FireworkRocketItem && (minecraft.player.isFallFlying() || minecraft.hitResult instanceof BlockHitResult && minecraft.hitResult.getType() != HitResult.Type.MISS))
                 return LegacyComponents.LAUNCH;
@@ -710,12 +824,32 @@ public interface ControlTooltip {
         return null;
     }
 
+    static boolean isHoldingBoneMeal(Player player) {
+        return player.getMainHandItem().is(Items.BONE_MEAL) || player.getOffhandItem().is(Items.BONE_MEAL);
+    }
+
+    static boolean canHarvestSweetBerries(BlockState state, Player player) {
+        if (!(state.getBlock() instanceof SweetBerryBushBlock)) return false;
+        int age = state.getValue(SweetBerryBushBlock.AGE);
+        return age > 1 && (age < 3 || !isHoldingBoneMeal(player));
+    }
+
+    static boolean canHarvestGlowBerries(BlockState state) {
+        return CaveVines.hasGlowBerries(state);
+    }
+
     static boolean canSetLoveMode(Entity entity, ItemStack usedItem) {
         return (entity instanceof Animal a && !a.isBaby() && a.isFood(usedItem) && a.canFallInLove() && !a.isInLove() && (!(a instanceof AbstractHorse) || isLoveFood(a, usedItem)));
     }
 
+    static boolean canUnlockVault(BlockState state, ItemStack item) {
+        if (!(state != null && state.getBlock() instanceof VaultBlock) || state.getValue(VaultBlock.STATE) != VaultState.ACTIVE)
+            return false;
+        return state.getValue(VaultBlock.OMINOUS) ? item.is(Items.OMINOUS_TRIAL_KEY) : item.is(Items.TRIAL_KEY);
+    }
+
     static boolean canFeed(Minecraft minecraft, Entity entity, ItemStack usedItem) {
-        return (entity instanceof Animal a && a.isFood(usedItem) && (!(a instanceof AbstractHorse) && a.isBaby() || a instanceof AbstractHorse h && (a instanceof Llama || (a.isBaby() || !usedItem.is(Items.HAY_BLOCK))) && (!h.isTamed() || !isLoveFood(a, usedItem) && a.getHealth() < a.getMaxHealth() && !minecraft.player.isSecondaryUseActive()))) || (entity instanceof Panda panda && usedItem.is(Items.BAMBOO) && panda.isFood(usedItem) && !panda.isEating() && !panda.canFallInLove());
+        return (entity instanceof Animal a && a.isFood(usedItem) && (!(a instanceof AbstractHorse) && a.isBaby() || a instanceof AbstractHorse h && (a instanceof Llama || (a.isBaby() || !usedItem.is(Items.HAY_BLOCK))) && (!h.isTamed() || !isLoveFood(a, usedItem) && a.getHealth() < a.getMaxHealth() && !minecraft.player.isSecondaryUseActive()))) || (entity instanceof Panda panda && usedItem.is(Items.BAMBOO) && panda.isFood(usedItem) && !panda.isEating() && !panda.canFallInLove()) || entity instanceof Dolphin && usedItem.is(ItemTags.FISHES);
     }
 
     static boolean canFeedWithGoldenDandelion(Entity entity, ItemStack usedItem) {
@@ -726,9 +860,86 @@ public interface ControlTooltip {
         return (a instanceof Llama && stack.is(Items.HAY_BLOCK)) || a instanceof Horse && ((stack.is(Items.GOLDEN_CARROT) || stack.is(Items.GOLDEN_APPLE) || stack.is(Items.ENCHANTED_GOLDEN_APPLE)));
     }
 
+    static boolean canShearEquipment(LivingEntity entity, EquipmentSlot slot) {
+        ItemStack item = entity.getItemBySlot(slot);
+        return item.has(DataComponents.EQUIPPABLE) && item.get(DataComponents.EQUIPPABLE).canBeSheared();
+    }
+
+    //? if >=1.21.11 {
+    static boolean canOpenNautilusInventory(Minecraft minecraft, AbstractNautilus nautilus) {
+        return !nautilus.isBaby() && nautilus.isTame() && minecraft.player.isSecondaryUseActive() && (!nautilus.isVehicle() || nautilus.hasPassenger(minecraft.player));
+    }
+
+    static boolean canEquipNautilus(AbstractNautilus nautilus, ItemStack item, EquipmentSlot slot) {
+        return nautilus.canUseSlot(slot) && nautilus.isEquippableInSlot(item, slot) && nautilus.getItemBySlot(slot).isEmpty();
+    }
+    //?}
+
     static boolean canPlace(Minecraft minecraft, ItemStack usedItem, InteractionHand hand) {
-        BlockPlaceContext c;
-        return minecraft.hitResult != null && minecraft.hitResult.getType() != HitResult.Type.MISS && !usedItem.isEmpty() && ((usedItem.getItem() instanceof SpawnEggItem e && (!(minecraft.hitResult instanceof EntityHitResult r) || r.getEntity().getType() == e.getType(usedItem))) || minecraft.hitResult instanceof BlockHitResult r && (usedItem.getItem() instanceof BlockItem b && (c = new BlockPlaceContext(minecraft.player, hand, usedItem, r)).canPlace() && ((BlockItemAccessor) b).getPlacementBlockState(c) != null));
+        if (minecraft.hitResult == null || minecraft.hitResult.getType() == HitResult.Type.MISS || usedItem.isEmpty())
+            return false;
+        if (usedItem.getItem() instanceof SpawnEggItem e)
+            return !(minecraft.hitResult instanceof EntityHitResult r) || r.getEntity().getType() == e.getType(usedItem);
+        if (!(minecraft.hitResult instanceof BlockHitResult r))
+            return false;
+        if (usedItem.getItem() instanceof BlockItem b) {
+            BlockPlaceContext c = new BlockPlaceContext(minecraft.player, hand, usedItem, r);
+            return c.canPlace() && ((BlockItemAccessor) b).getPlacementBlockState(c) != null;
+        }
+        return canPlaceArmorStand(minecraft, usedItem, hand, r) || canPlaceMinecart(minecraft, usedItem, r) || canPlaceEndCrystal(minecraft, usedItem, r);
+    }
+
+    static boolean canPlaceArmorStand(Minecraft minecraft, ItemStack usedItem, InteractionHand hand, BlockHitResult hitResult) {
+        if (!(usedItem.getItem() instanceof ArmorStandItem) || hitResult.getDirection() == Direction.DOWN)
+            return false;
+        BlockPlaceContext context = new BlockPlaceContext(minecraft.player, hand, usedItem, hitResult);
+        AABB box = EntityType.ARMOR_STAND.getDimensions().makeBoundingBox(Vec3.atBottomCenterOf(context.getClickedPos()));
+        return minecraft.level.noCollision(null, box) && minecraft.level.getEntities(null, box).isEmpty();
+    }
+
+    static boolean canPlaceMinecart(Minecraft minecraft, ItemStack usedItem, BlockHitResult hitResult) {
+        return usedItem.getItem() instanceof MinecartItem && minecraft.level.getBlockState(hitResult.getBlockPos()).is(BlockTags.RAILS);
+    }
+
+    static boolean canPlaceEndCrystal(Minecraft minecraft, ItemStack usedItem, BlockHitResult hitResult) {
+        if (!(usedItem.getItem() instanceof EndCrystalItem))
+            return false;
+        BlockPos pos = hitResult.getBlockPos();
+        BlockState state = minecraft.level.getBlockState(pos);
+        BlockPos above = pos.above();
+        return (state.is(Blocks.OBSIDIAN) || state.is(Blocks.BEDROCK)) && minecraft.level.isEmptyBlock(above) && minecraft.level.getEntities(null, new AABB(above)).isEmpty();
+    }
+
+    static boolean canPlaceBoat(Minecraft minecraft) {
+        BlockHitResult hitResult = Item.getPlayerPOVHitResult(minecraft.level, minecraft.player, ClipContext.Fluid.ANY);
+        return hitResult.getType() == HitResult.Type.BLOCK && minecraft.level.mayInteract(minecraft.player, hitResult.getBlockPos());
+    }
+
+    static boolean canPlaceOnWater(Minecraft minecraft, ItemStack usedItem) {
+        BlockHitResult hitResult = mayInteractItemAt(minecraft, usedItem, Item.getPlayerPOVHitResult(minecraft.level, minecraft.player, ClipContext.Fluid.SOURCE_ONLY));
+        return hitResult != null && minecraft.level.getFluidState(hitResult.getBlockPos()).is(FluidTags.WATER);
+    }
+
+    static boolean isHangingLanternPlacement(Minecraft minecraft, ItemStack usedItem, InteractionHand hand) {
+        if (!(minecraft.hitResult instanceof BlockHitResult hitResult) || !(usedItem.getItem() instanceof BlockItem blockItem))
+            return false;
+        BlockPlaceContext context = new BlockPlaceContext(minecraft.player, hand, usedItem, hitResult);
+        if (!context.canPlace())
+            return false;
+        BlockState state = ((BlockItemAccessor) blockItem).getPlacementBlockState(context);
+        return state != null && state.hasProperty(BlockStateProperties.HANGING) && state.getValue(BlockStateProperties.HANGING);
+    }
+
+    static Component getDecoratedPotAction(Minecraft minecraft, BlockHitResult hitResult, BlockState blockState) {
+        if (hitResult == null || blockState == null || !(blockState.getBlock() instanceof DecoratedPotBlock) || !(minecraft.level.getBlockEntity(hitResult.getBlockPos()) instanceof DecoratedPotBlockEntity pot))
+            return null;
+        ItemStack stored = pot.getTheItem();
+        for (InteractionHand hand : InteractionHand.values()) {
+            ItemStack item = minecraft.player.getItemInHand(hand);
+            if (!item.isEmpty() && (stored.isEmpty() || ItemStack.isSameItemSameComponents(stored, item) && stored.getCount() < stored.getMaxStackSize()))
+                return LegacyComponents.PLACE;
+        }
+        return null;
     }
 
     static boolean canHang(Minecraft minecraft, BlockHitResult hitResult, BlockState blockState, ItemStack usedItem) {
@@ -746,6 +957,10 @@ public interface ControlTooltip {
         return use != null && use.getFirst().test(new UseOnContext(minecraft.player, hand, r));
     }
 
+    static boolean canShearPlant(BlockState state) {
+        return state != null && state.getBlock() instanceof GrowingPlantHeadBlock plant && !plant.isMaxAge(state);
+    }
+
     static boolean canTame(Minecraft minecraft, InteractionHand hand, ItemStack usedItem) {
         return minecraft.hitResult instanceof EntityHitResult e && ((e.getEntity() instanceof TamableAnimal t && !t.isTame() && ((t instanceof Wolf && usedItem.is(Items.BONE)) || (!(t instanceof Wolf) && t.isFood(usedItem)))) || (e.getEntity() instanceof Parrot && (usedItem.is(Items.WHEAT_SEEDS) || usedItem.is(Items.MELON_SEEDS) || usedItem.is(Items.PUMPKIN_SEEDS) || usedItem.is(Items.BEETROOT_SEEDS))) || (hand == InteractionHand.MAIN_HAND && e.getEntity() instanceof AbstractHorse h && !h.isTamed() && !minecraft.player.isSecondaryUseActive() && usedItem.isEmpty()));
     }
@@ -759,7 +974,20 @@ public interface ControlTooltip {
     }
 
     static boolean canDyeEntity(Minecraft minecraft, ItemStack usedItem) {
-        return usedItem.getItem() instanceof DyeItem dye && minecraft.hitResult instanceof EntityHitResult result && minecraft.player != null && (result.getEntity() instanceof Sheep sheep && sheep.getColor() != LegacyItemUtil.getDyeColor(dye.asItem()) || result.getEntity() instanceof Wolf w && w.isTame() && w.isOwnedBy(minecraft.player) && w.getCollarColor() != LegacyItemUtil.getDyeColor(dye.asItem()) || result.getEntity() instanceof Cat c && c.isTame() && c.isOwnedBy(minecraft.player) && c.getCollarColor() != LegacyItemUtil.getDyeColor(dye.asItem()));
+        DyeColor color = LegacyItemUtil.getDyeColorOrNull(usedItem.getItem());
+        if (color == null || !(minecraft.hitResult instanceof EntityHitResult result) || minecraft.player == null)
+            return false;
+        Entity entity = result.getEntity();
+        return entity instanceof Sheep sheep && sheep.getColor() != color || entity instanceof Shulker shulker && shulker.getColor() != color || canDyeCollar(entity, minecraft.player, color);
+    }
+
+    static boolean canDyeCollar(Minecraft minecraft, ItemStack usedItem) {
+        DyeColor color = LegacyItemUtil.getDyeColorOrNull(usedItem.getItem());
+        return color != null && minecraft.hitResult instanceof EntityHitResult result && minecraft.player != null && canDyeCollar(result.getEntity(), minecraft.player, color);
+    }
+
+    static boolean canDyeCollar(Entity entity, Player player, DyeColor color) {
+        return entity instanceof Wolf w && w.isTame() && w.isOwnedBy(player) && w.getCollarColor() != color || entity instanceof Cat c && c.isTame() && c.isOwnedBy(player) && c.getCollarColor() != color;
     }
 
     Icon getIcon();
@@ -1234,7 +1462,8 @@ public interface ControlTooltip {
 
         @Override
         public void extractRenderState(GuiGraphicsExtractor GuiGraphicsExtractor, int i, int j, float f) {
-            if (!LegacyOptions.inGameTooltips.get() && minecraft.screen == null || !LegacyOptions.displayControlTooltips.get())
+            boolean inGame = minecraft.screen == null;
+            if (!LegacyOptions.displayControlTooltips.get() || inGame && (!LegacyOptions.displayHUD.get() || minecraft.options.hideGui || !LegacyOptions.inGameTooltips.get()))
                 return;
             renderTooltips.clear();
             for (ControlTooltip tooltip : tooltips) {

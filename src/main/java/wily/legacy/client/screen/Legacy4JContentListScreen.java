@@ -1,12 +1,13 @@
 package wily.legacy.client.screen;
 
 import com.mojang.blaze3d.platform.NativeImage;
+import com.mojang.blaze3d.systems.RenderSystem;
+import com.mojang.blaze3d.textures.FilterMode;
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.gui.components.*;
 import net.minecraft.client.input.InputWithModifiers;
 import net.minecraft.client.renderer.texture.DynamicTexture;
 import wily.legacy.client.ContentManager;
-import wily.legacy.client.StorePreviewAtlas;
 import com.mojang.blaze3d.platform.InputConstants;
 import net.minecraft.client.gui.Font;
 import net.minecraft.client.gui.GuiGraphicsExtractor;
@@ -19,13 +20,13 @@ import net.minecraft.util.ARGB;
 import wily.factoryapi.base.client.FactoryGuiGraphics;
 import wily.factoryapi.base.client.UIAccessor;
 import wily.legacy.Legacy4J;
-import wily.legacy.skins.skin.CustomSkinPackStore;
-import wily.legacy.skins.skin.DownloadedSkinPackStore;
 import wily.legacy.client.CommonColor;
 import wily.legacy.client.ControlType;
+import wily.legacy.client.LegacyOptions;
 import wily.legacy.client.controller.ControllerBinding;
 import wily.legacy.skins.client.preview.PlayerSkinWidget;
 import wily.legacy.util.LegacySprites;
+import wily.legacy.util.client.LegacyFontUtil;
 import wily.legacy.util.client.LegacyRenderUtil;
 
 import java.io.IOException;
@@ -46,11 +47,14 @@ public class Legacy4JContentListScreen extends PanelVListScreen implements Contr
     private static final int LIST_WIDTH = 218;
     private static final int LIST_HEIGHT = 162;
     private static final int BUTTON_HEIGHT = 30;
+    private static final int HD_STORE_IMAGE_SIZE = 120;
+    private static final int SD_STORE_IMAGE_SIZE = 90;
+    private static final int STORE_IMAGE_SIZE_TOLERANCE = 4;
     
     protected final ContentManager.Category category;
     protected final List<ContentManager.Pack> packs;
     protected ContentManager.Pack hoveredPack;
-    protected final Panel tooltipBox = Panel.tooltipBoxOf(panel, TOOLTIP_WIDTH);
+    protected final Panel tooltipBox = Panel.tooltipBoxOf(panel, () -> accessor.getInteger("tooltipBox.width", TOOLTIP_WIDTH));
     private final Panel panelRecess;
     
     // Legacy Scrolling System
@@ -68,6 +72,29 @@ public class Legacy4JContentListScreen extends PanelVListScreen implements Contr
     private record RemoteImage(Identifier id, int width, int height) {
     }
 
+    private record ImageSize(int width, int height) {
+    }
+
+    private static class StorePreviewTexture extends DynamicTexture {
+        public StorePreviewTexture(java.util.function.Supplier<String> name, NativeImage image) {
+            super(name, image);
+            sampler = RenderSystem.getSamplerCache().getClampToEdge(FilterMode.LINEAR);
+        }
+    }
+
+    private ImageSize fitRemoteImage(RemoteImage image, int maxWidth, int maxHeight) {
+        if (image.width == image.height) {
+            int defaultSize = LegacyOptions.getUIMode().isSD() ? SD_STORE_IMAGE_SIZE : HD_STORE_IMAGE_SIZE;
+            int size = accessor.getInteger("previewImage.size", defaultSize);
+            if (size <= maxWidth && size <= maxHeight + STORE_IMAGE_SIZE_TOLERANCE) {
+                return new ImageSize(size, size);
+            }
+        }
+
+        float scale = Math.min((float) maxWidth / image.width, (float) maxHeight / image.height);
+        return new ImageSize(Math.max(1, Math.round(image.width * scale)), Math.max(1, Math.round(image.height * scale)));
+    }
+
     public Legacy4JContentListScreen(Screen parent, ContentManager.Category category, List<ContentManager.Pack> packs) {
         super(s -> Panel.createPanel(s,
                 p -> p.appearance(PANEL_WIDTH, PANEL_HEIGHT), 
@@ -83,7 +110,7 @@ public class Legacy4JContentListScreen extends PanelVListScreen implements Contr
         packs.forEach(pack -> installedPacks.put(pack.id(), ContentManager.isPackInstalled(pack, category)));
         if (!packs.isEmpty()) {
             hoveredPack = packs.get(0);
-            if (getLocalPreview(category, hoveredPack) == null) requestImage(hoveredPack.imageUrl());
+            requestImage(hoveredPack.imageUrl());
         }
         
         renderableVList.layoutSpacing(l -> 0);
@@ -97,7 +124,11 @@ public class Legacy4JContentListScreen extends PanelVListScreen implements Contr
     }
 
     private MultiLineLabel getDescriptionLabel(ContentManager.Pack pack, int width) {
-        return descriptionLabels.computeIfAbsent(pack.id(), id -> MultiLineLabel.create(font, pack.descriptionComponent(), width));
+        Component description = pack.descriptionComponent().copy().withColor(CommonColor.TIP_TEXT.get() & 0x00FFFFFF);
+        if (LegacyOptions.getUIMode().isSD()) {
+            return Panel.sdLabelsCache.apply(description, width);
+        }
+        return Panel.labelsCache.apply(description, width);
     }
 
     private boolean isDownloading(ContentManager.Pack pack) {
@@ -106,12 +137,12 @@ public class Legacy4JContentListScreen extends PanelVListScreen implements Contr
 
     private void selectPack(ContentManager.Pack pack) {
         if (hoveredPack == pack) {
-            if (getLocalPreview(category, pack) == null) requestImage(pack.imageUrl());
+            requestImage(pack.imageUrl());
             return;
         }
         hoveredPack = pack;
         scrollableRenderer.resetScrolled();
-        if (getLocalPreview(category, pack) == null) requestImage(pack.imageUrl());
+        requestImage(pack.imageUrl());
     }
 
     private void addMenuButton(ContentManager.Pack pack) {
@@ -140,24 +171,12 @@ public class Legacy4JContentListScreen extends PanelVListScreen implements Contr
     }
 
     private boolean prepareDownloadTarget(ContentManager.Pack pack) {
-        if (!prepareManagedTarget(category)) return false;
-        if (!pack.hasBundlePacks()) return true;
-        for (ContentManager.Pack.BundlePack bundlePack : pack.bundlePacks()) {
-            Optional<ContentManager.Category> bundleCategory = ContentManager.CATEGORIES.stream().filter(c -> c.id().equals(bundlePack.categoryId())).findFirst();
-            if (bundleCategory.isPresent() && !bundleCategory.get().id().equals(category.id()) && !prepareManagedTarget(bundleCategory.get())) return false;
-        }
-        return true;
-    }
-
-    private boolean prepareManagedTarget(ContentManager.Category targetCategory) {
-        if (!DownloadedSkinPackStore.managesTargetDirectory(targetCategory.targetDirectoryName()) && !CustomSkinPackStore.managesTargetDirectory(targetCategory.targetDirectoryName())) return true;
         try {
-            if (DownloadedSkinPackStore.managesTargetDirectory(targetCategory.targetDirectoryName())) DownloadedSkinPackStore.enableResourcePack(minecraft);
-            else CustomSkinPackStore.enableResourcePack(minecraft);
+            ContentManager.prepareDownloadTarget(pack, category);
             return true;
         } catch (IOException e) {
             String message = e.getMessage();
-            minecraft.setScreen(ConfirmationScreen.createInfoScreen(this, targetCategory.title(), Component.literal(message == null || message.isBlank() ? e.toString() : message)));
+            minecraft.setScreen(ConfirmationScreen.createInfoScreen(this, category.title(), Component.literal(message == null || message.isBlank() ? e.toString() : message)));
             return false;
         }
     }
@@ -170,7 +189,8 @@ public class Legacy4JContentListScreen extends PanelVListScreen implements Contr
     private void finishDownload(ContentManager.Pack pack, boolean installedAnything, boolean reloadResources) {
         downloadingPacks.remove(pack.id());
         refreshInstalledPacks();
-        if (installedAnything && reloadResources) {
+        boolean appliedResourcePacks = installedAnything && ContentManager.applyAutoResourcePacks(pack, category);
+        if (installedAnything && (reloadResources || appliedResourcePacks)) {
             if (minecraft.screen == this) needsReload = true;
             else minecraft.reloadResourcePacks();
         }
@@ -203,14 +223,6 @@ public class Legacy4JContentListScreen extends PanelVListScreen implements Contr
         return null;
     }
 
-    private static StorePreviewAtlas.Entry getLocalPreview(ContentManager.Category category, ContentManager.Pack pack) {
-        if ("skinpacks".equals(category.id())) {
-            StorePreviewAtlas.Entry skinpackPreview = StorePreviewAtlas.getSkinpack(pack.id());
-            if (skinpackPreview != null) return skinpackPreview;
-        }
-        return StorePreviewAtlas.get(pack.id());
-    }
-
     private static CompletableFuture<RemoteImage> requestImage(Optional<URI> url) {
         if (url.isEmpty()) return CompletableFuture.completedFuture(null);
         String key = url.get().toString();
@@ -234,7 +246,7 @@ public class Legacy4JContentListScreen extends PanelVListScreen implements Contr
                     String cleanId = Integer.toHexString(key.hashCode());
                     Identifier textureId = Identifier.fromNamespaceAndPath("legacy", "pack_image_" + cleanId);
                     
-                    client.getTextureManager().register(textureId, new DynamicTexture(() -> "pack_image_" + cleanId, nativeImage));
+                    client.getTextureManager().register(textureId, new StorePreviewTexture(() -> "pack_image_" + cleanId, nativeImage));
                     
                     RemoteImage remoteImage = new RemoteImage(textureId, nativeWidth, nativeHeight);
                     downloadedImages.put(key, remoteImage);
@@ -286,13 +298,13 @@ public class Legacy4JContentListScreen extends PanelVListScreen implements Contr
         tooltipBox.init();
         panelRecess.init("panelRecess");
         addRenderableOnly(panelRecess);
-        addRenderableOnly(((GuiGraphicsExtractor, i, j, f) -> GuiGraphicsExtractor.text(font, getTitle(), panel.getX() + (panel.getWidth() - font.width(getTitle())) / 2, panelRecess.getY() + 8, CommonColor.GRAY_TEXT.get(), false)));
+        addRenderableOnly(((GuiGraphicsExtractor, i, j, f) -> LegacyFontUtil.applySDFont(sd -> GuiGraphicsExtractor.text(font, getTitle(), panel.getX() + (panel.getWidth() - font.width(getTitle())) / 2, panelRecess.getY() + 8, CommonColor.GRAY_TEXT.get(), false))));
     }
 
     @Override
     public void renderableVListInit() {
         for (int i = 0; i < Math.min(4, packs.size()); i++) {
-            if (getLocalPreview(category, packs.get(i)) == null) requestImage(packs.get(i).imageUrl());
+            requestImage(packs.get(i).imageUrl());
         }
 
         getRenderableVList().init("renderableVList", panel.getX() + LIST_X, panel.getY() + LIST_Y, LIST_WIDTH, LIST_HEIGHT);
@@ -310,22 +322,15 @@ public class Legacy4JContentListScreen extends PanelVListScreen implements Contr
             int x = tooltipBox.getX() + 8;
             int y = tooltipBox.getY() + 8;
             int width = tooltipBox.getWidth() - 16;
-            StorePreviewAtlas.Entry localPreview = getLocalPreview(category, displayPack);
-            RemoteImage remoteImage = localPreview == null ? getOrDownloadImage(displayPack.imageUrl()) : null;
+            RemoteImage remoteImage = getOrDownloadImage(displayPack.imageUrl());
             int imageAreaHeight = 0;
-            int maxImgHeight = (tooltipBox.getHeight() * 4) / 10;
+            int maxImgHeight = (tooltipBox.getHeight() * 2) / 3;
 
-            if (localPreview != null) {
-                float scale = Math.min((float) width / localPreview.width(), (float) maxImgHeight / localPreview.height());
-                int imgWidth = (int) (localPreview.width() * scale);
-                int imgHeight = (int) (localPreview.height() * scale);
-                GuiGraphicsExtractor.blit(RenderPipelines.GUI_TEXTURED, localPreview.resource(), x + (width - imgWidth) / 2, y, (float) localPreview.u(), localPreview.v(), imgWidth, imgHeight, localPreview.width(), localPreview.height(), localPreview.atlasWidth(), localPreview.atlasHeight());
-                imageAreaHeight = imgHeight + 10;
-            } else if (displayPack.imageUrl().isPresent()) {
+            if (displayPack.imageUrl().isPresent()) {
                 if (remoteImage != null && remoteImage.width > 0) {
-                    float scale = Math.min((float) width / remoteImage.width, (float) maxImgHeight / remoteImage.height);
-                    int imgWidth = (int) (remoteImage.width * scale);
-                    int imgHeight = (int) (remoteImage.height * scale);
+                    ImageSize imageSize = fitRemoteImage(remoteImage, width, maxImgHeight);
+                    int imgWidth = imageSize.width();
+                    int imgHeight = imageSize.height();
                     
                     FactoryGuiGraphics.of(GuiGraphicsExtractor).blit(remoteImage.id, x + (width - imgWidth) / 2, y, 0.0f, 0.0f, imgWidth, imgHeight, imgWidth, imgHeight);
                     imageAreaHeight = imgHeight + 10;
@@ -335,7 +340,7 @@ public class Legacy4JContentListScreen extends PanelVListScreen implements Contr
                 }
             }
 
-            int lineHeight = 12;
+            int lineHeight = LegacyOptions.getUIMode().isSD() ? 8 : 12;
             int descriptionY = y + imageAreaHeight;
             int descriptionWidth = width;
             MultiLineLabel label = getDescriptionLabel(displayPack, descriptionWidth);
@@ -344,8 +349,8 @@ public class Legacy4JContentListScreen extends PanelVListScreen implements Contr
             scrollableRenderer.scrolled.max = Math.max(0, label.getLineCount() - visibleLines);
             scrollableRenderer.lineHeight = lineHeight;
 
-            scrollableRenderer.extractRenderState(GuiGraphicsExtractor, x, descriptionY, descriptionWidth, visibleLines * lineHeight, () -> 
-                label.visitLines(net.minecraft.client.gui.TextAlignment.LEFT, x, descriptionY, lineHeight, GuiGraphicsExtractor.textRenderer())
+            scrollableRenderer.extractRenderState(GuiGraphicsExtractor, x, descriptionY, descriptionWidth, visibleLines * lineHeight, () ->
+                LegacyFontUtil.applySDFont(sd -> label.visitLines(net.minecraft.client.gui.TextAlignment.LEFT, x, descriptionY, lineHeight, GuiGraphicsExtractor.textRenderer()))
             );
         }
     }
@@ -416,8 +421,10 @@ public class Legacy4JContentListScreen extends PanelVListScreen implements Contr
             int textX = this.getX() + 8;
             boolean hasStatusIcon = downloadingPacks.contains(pack.id()) || ContentManager.isPackDownloading(pack, category) || installedPacks.getOrDefault(pack.id(), false);
             int maxWidth = this.width - (hasStatusIcon ? 44 : 16);
-            String clipped = PlayerSkinWidget.clipText(font, getMessage() == null ? "" : getMessage().getString(), Math.max(0, maxWidth));
-            GuiGraphicsExtractor.text(font, clipped, textX, textY, color, true);
+            LegacyFontUtil.applySDFont(sd -> {
+                String clipped = PlayerSkinWidget.clipText(font, getMessage() == null ? "" : getMessage().getString(), Math.max(0, maxWidth));
+                GuiGraphicsExtractor.text(font, clipped, textX, textY, color, true);
+            });
         }
     }
 }

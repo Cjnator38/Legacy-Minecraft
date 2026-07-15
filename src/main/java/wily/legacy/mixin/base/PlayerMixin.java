@@ -4,8 +4,13 @@ import com.llamalad7.mixinextras.injector.ModifyExpressionValue;
 import net.minecraft.world.InteractionHand;
 import net.minecraft.world.entity.EntityType;
 import net.minecraft.world.entity.LivingEntity;
+import net.minecraft.world.entity.Mob;
 import net.minecraft.world.entity.player.Abilities;
 import net.minecraft.world.entity.player.Player;
+import net.minecraft.server.level.ServerLevel;
+import net.minecraft.stats.Stats;
+import net.minecraft.world.damagesource.DamageSource;
+import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.item.ShieldItem;
 import net.minecraft.world.item.enchantment.Enchantments;
 import net.minecraft.world.level.Level;
@@ -25,6 +30,7 @@ import wily.legacy.config.LegacyCommonOptions;
 import wily.legacy.entity.LegacyShieldPlayer;
 import wily.legacy.entity.PlayerYBobbing;
 import wily.legacy.init.LegacyGameRules;
+import wily.legacy.init.LegacyRegistries;
 import wily.legacy.util.LegacyItemUtil;
 
 @Mixin(Player.class)
@@ -33,6 +39,8 @@ public abstract class PlayerMixin extends LivingEntity implements LegacyShieldPl
     private boolean legacy$autoShielding;
     @Unique
     private int legacy$shieldPauseUntilTick;
+    @Unique
+    private boolean legacy$skeletonJockeyKill;
 
     protected PlayerMixin(EntityType<? extends LivingEntity> entityType, Level level) {
         super(entityType, level);
@@ -66,7 +74,28 @@ public abstract class PlayerMixin extends LivingEntity implements LegacyShieldPl
 
     @Inject(method = "tick", at = @At("RETURN"))
     protected void tickShieldControls(CallbackInfo ci) {
+        legacy$stopFallFlyingInWater();
         legacy$updateShieldControls();
+    }
+
+    @Inject(method = "blockUsingItem", at = @At("RETURN"))
+    protected void blockUsingItem(ServerLevel level, LivingEntity attacker, CallbackInfo ci) {
+        ItemStack blockingItem = getItemBlockingWith();
+        if (blockingItem == null || !(blockingItem.getItem() instanceof ShieldItem) || !(attacker instanceof Mob)) return;
+        attacker.knockback(0.5D, getX() - attacker.getX(), getZ() - attacker.getZ());
+    }
+
+    @Inject(method = "killedEntity", at = @At("HEAD"))
+    protected void killedEntity(ServerLevel level, LivingEntity entity, DamageSource source, CallbackInfoReturnable<Boolean> cir) {
+        legacy$skeletonJockeyKill = entity.getType() == EntityType.SKELETON && entity.getVehicle() != null && entity.getVehicle().getType() == EntityType.SPIDER;
+    }
+
+    @Inject(method = "killedEntity", at = @At("RETURN"))
+    protected void killedSkeletonJockey(ServerLevel level, LivingEntity entity, DamageSource source, CallbackInfoReturnable<Boolean> cir) {
+        if (legacy$skeletonJockeyKill && cir.getReturnValueZ()) {
+            ((Player) (Object) this).awardStat(Stats.CUSTOM.get(LegacyRegistries.SKELETON_JOCKEY_STAT));
+        }
+        legacy$skeletonJockeyKill = false;
     }
 
     @Inject(method = "getCurrentItemAttackStrengthDelay", at = @At(value = "HEAD"), cancellable = true)
@@ -109,6 +138,13 @@ public abstract class PlayerMixin extends LivingEntity implements LegacyShieldPl
     @ModifyArg(method = "travel", at = @At(value = "INVOKE", target = "Lnet/minecraft/core/BlockPos;containing(DDD)Lnet/minecraft/core/BlockPos;"), index = 1)
     protected double travel(double original) {
         return LegacyGameRules.getSidedBooleanGamerule(this, LegacyGameRules.LEGACY_SWIMMING) ? original + 0.1f : original;
+    }
+
+    @Unique
+    private void legacy$stopFallFlyingInWater() {
+        if ((!FactoryAPI.isClient() || Legacy4JClient.hasModOnServer()) && isFallFlying() && isInWater()) {
+            stopFallFlying();
+        }
     }
 
     @Unique

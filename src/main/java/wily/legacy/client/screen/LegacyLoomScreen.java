@@ -152,8 +152,8 @@ public class LegacyLoomScreen extends RecipesScreen<LegacyCraftingMenu, RecipeIc
         super.addControlTooltips(renderer);
         renderer.
                 add(OPTION::get, () -> ControlTooltip.getKeyMessage(InputConstants.KEY_O, this)).
-                add(ControlTooltip.EXTRA::get, () -> getFocused() instanceof RecipeIconHolder<?> r && r.getFocusedRecipe() != null && selectedPatterns.contains(r.getFocusedRecipe()) ? LegacyComponents.REMOVE : null).
-                add(CONTROL_TAB::get, () -> isSelectionTab() ? null : LegacyComponents.GROUP).
+                add(ControlTooltip.EXTRA::get, () -> getFocused() instanceof RecipeIconHolder<?> r && r.getFocusedRecipe() != null && selectedPatterns.contains(r.getFocusedRecipe()) ? LegacyComponents.REMOVE_PATTERN : null).
+                add(CONTROL_TAB::get, () -> isSelectionTab() ? null : LegacyComponents.CHANGE_GROUP).
                 add(CONTROL_TYPE::get, () -> page.max > 0 ? LegacyComponents.PAGE : null);
     }
 
@@ -347,7 +347,7 @@ public class LegacyLoomScreen extends RecipesScreen<LegacyCraftingMenu, RecipeIc
         RecipeIconHolder<BannerRecipe> h = new RecipeIconHolder<>(leftPos + 13 + index * 27, topPos + 38) {
             @Override
             public @Nullable Component getAction(Context context) {
-                return context.actionOfContext(KeyContext.class, c -> c.key() == InputConstants.KEY_RETURN && isFocused() && LegacyLoomScreen.this.canCraft() ? LegacyComponents.CREATE : c.key() == InputConstants.KEY_O && isFocused() && canCraft() ? LegacyComponents.ADD : null);
+                return context.actionOfContext(KeyContext.class, c -> c.key() == InputConstants.KEY_RETURN && isFocused() && LegacyLoomScreen.this.canCraft() ? LegacyComponents.CREATE : c.key() == InputConstants.KEY_O && isFocused() && canCraft() ? LegacyComponents.ADD_PATTERN : null);
             }
 
             @Override
@@ -481,8 +481,9 @@ public class LegacyLoomScreen extends RecipesScreen<LegacyCraftingMenu, RecipeIc
         holder.renderTooltip(minecraft, GuiGraphicsExtractor, i, j);
 
         if (!resultStack.isEmpty()) {
-            Component resultName = getRecipeButtons().get(selectedRecipeButton) instanceof RecipeIconHolder<?> h ? h.getFocusedRecipe().getName() : resultStack.getHoverName();
-            Component description = getRecipeButtons().get(selectedRecipeButton) instanceof RecipeIconHolder<?> h ? h.getFocusedRecipe().getDescription() : null;
+            RecipeInfo<?> focusedRecipe = getRecipeButtons().get(selectedRecipeButton) instanceof RecipeIconHolder<?> h ? h.getFocusedRecipe() : null;
+            Component resultName = focusedRecipe == null ? resultStack.getHoverName() : focusedRecipe.getName();
+            Component description = focusedRecipe == null ? null : focusedRecipe.getDescription();
             int titleY = bottomPanelY + accessor.getInteger("craftingTitle.y", 11) - (description == null ? 0 : 6);
             LegacyFontUtil.applySDFont(b -> LegacyRenderUtil.renderScrollingString(GuiGraphicsExtractor, font, resultName, xDiff + 2 + Math.max(panelWidth - font.width(resultName), 0) / 2, topPos + titleY, xDiff + panelWidth - 2, topPos + titleY + 11, CommonColor.GRAY_TEXT.get(), false));
             if (description != null)

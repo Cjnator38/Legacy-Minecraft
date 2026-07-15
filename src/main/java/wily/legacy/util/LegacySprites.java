@@ -105,6 +105,7 @@ public class LegacySprites {
     public static final Identifier TICKBOX_HOVERED = Legacy4J.createModLocation("widget/tickbox_hovered");
     public static final Identifier TICK = Legacy4J.createModLocation("widget/tick");
     public static final Identifier SMALL_TICK = Legacy4J.createModLocation("widget/small_tick");
+    public static final Identifier SKIN_TICK = Legacy4J.createModLocation("widget/skin_tick");
     public static final Identifier RGB_PREVIEW = Legacy4J.createModLocation("widget/rgb_preview");
     public static final Identifier LOOM_ERROR = FactoryAPI.createVanillaLocation("container/loom/error");
     public static final Identifier FUEL_LENGTH_SPRITE = FactoryAPI.createVanillaLocation("container/brewing_stand/fuel_length");
@@ -141,6 +142,7 @@ public class LegacySprites {
     public static final Identifier HIGH_VERT_TAB_UP = Legacy4J.createModLocation("tiles/high_vert_tab_up");
     public static final Identifier LOW_VERT_TAB = Legacy4J.createModLocation("tiles/low_vert_tab");
     public static final Identifier ICON_HOLDER = Legacy4J.createModLocation("container/icon_holder");
+    public static final Identifier EMPTY_SLOT = Legacy4J.createModLocation("container/empty");
     public static final Identifier SIZEABLE_ICON_HOLDER = Legacy4J.createModLocation("container/sizeable_icon_holder");
     public static final Identifier SELECT_ICON_HIGHLIGHT = Legacy4J.createModLocation("container/select_icon_highlight");
     public static final Identifier SELECT_ICON_HIGHLIGHT_SMALL = Legacy4J.createModLocation("container/select_icon_highlight_small");

@@ -15,11 +15,13 @@ import org.objectweb.asm.Opcodes;
 import org.spongepowered.asm.mixin.Final;
 import org.spongepowered.asm.mixin.Mixin;
 import org.spongepowered.asm.mixin.Shadow;
+import org.spongepowered.asm.mixin.Unique;
 import org.spongepowered.asm.mixin.injection.At;
 import org.spongepowered.asm.mixin.injection.Inject;
 import org.spongepowered.asm.mixin.injection.Redirect;
 import org.spongepowered.asm.mixin.injection.callback.CallbackInfo;
 import org.spongepowered.asm.mixin.injection.callback.CallbackInfoReturnable;
+import wily.factoryapi.FactoryAPI;
 import wily.legacy.client.LegacyGamma;
 import wily.legacy.client.LegacyOptions;
 import wily.legacy.client.LegacySaveCache;
@@ -34,6 +36,9 @@ import java.util.function.Consumer;
 
 @Mixin(GameRenderer.class)
 public abstract class GameRendererMixin {
+    @Unique
+    private LegacyGamma legacy$gamma;
+
     @Shadow
     @Final
     private Minecraft minecraft;
@@ -52,7 +57,21 @@ public abstract class GameRendererMixin {
 
     @Inject(method = "render", at = @At(value = "INVOKE", target = "Lnet/minecraft/client/gui/render/GuiRenderer;render(Lcom/mojang/blaze3d/buffers/GpuBufferSlice;)V", shift = At.Shift.AFTER))
     private void render(DeltaTracker deltaTracker, boolean bl, CallbackInfo ci) {
-        if (minecraft.isGameLoadFinished() && LegacyOptions.displayLegacyGamma.get()) LegacyGamma.INSTANCE.render();
+        if (!legacy$canRenderGamma()) return;
+        if (legacy$gamma == null) legacy$gamma = new LegacyGamma();
+        legacy$gamma.render();
+    }
+
+    @Unique
+    private boolean legacy$canRenderGamma() {
+        return minecraft.isGameLoadFinished() && LegacyOptions.displayLegacyGamma.get() && !FactoryAPI.isModLoaded("vulkanmod");
+    }
+
+    @Inject(method = "close", at = @At("HEAD"))
+    private void legacy$closeGamma(CallbackInfo ci) {
+        if (legacy$gamma == null) return;
+        legacy$gamma.close();
+        legacy$gamma = null;
     }
 
     @Inject(method = "bobView", at = @At("RETURN"))

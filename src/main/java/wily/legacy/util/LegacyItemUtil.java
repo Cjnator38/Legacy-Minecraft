@@ -5,6 +5,7 @@ import net.minecraft.core.component.DataComponents;
 import net.minecraft.core.registries.Registries;
 import net.minecraft.tags.TagKey;
 import net.minecraft.network.chat.Component;
+import net.minecraft.network.chat.contents.TranslatableContents;
 import net.minecraft.resources.Identifier;
 import net.minecraft.tags.ItemTags;
 import net.minecraft.world.effect.MobEffectInstance;
@@ -30,13 +31,14 @@ public class LegacyItemUtil {
     public static final int DECAY_EFFECT_DURATION = 800;
     public static final int DECAY_EFFECT_AMPLIFIER = 1;
     public static final TagKey<Item> LCE_OFFHAND = TagKey.create(Registries.ITEM, Identifier.fromNamespaceAndPath("legacy", "lce_offhand"));
+    private static final Set<String> PEACEFUL_SPAWN_EGG_TIPS = Set.of("item.spawn_egg.peaceful", "item.minecraft.spawn_egg.peaceful.tip");
 
     public static boolean canRepair(ItemStack repairItem, ItemStack ingredient) {
         return repairItem.is(ingredient.getItem()) && repairItem.getCount() == 1 && ingredient.getCount() == 1 && repairItem.getItem().components().has(DataComponents.DAMAGE) && !repairItem.isEnchanted() && !ingredient.isEnchanted();
     }
 
     public static boolean isDyedItem(ItemStack itemStack) {
-        return itemStack.get(DataComponents.DYED_COLOR) == null;
+        return itemStack.has(DataComponents.DYED_COLOR);
     }
 
     public static boolean isDyeableItem(Holder<Item> item) {
@@ -114,8 +116,18 @@ public class LegacyItemUtil {
         return itemStack.getOrDefault(DataComponents.POTION_CONTENTS, PotionContents.EMPTY).potion().orElse(null);
     }
 
+    public static PotionContents getPotionContents(ItemStack itemStack) {
+        PotionContents contents = itemStack.getOrDefault(DataComponents.POTION_CONTENTS, PotionContents.EMPTY);
+        return contents.potion().isPresent() || contents.hasEffects() ? contents : null;
+    }
+
     public static ItemStack setItemStackPotion(ItemStack stack, Holder<Potion> potion) {
         stack.set(DataComponents.POTION_CONTENTS, new PotionContents(potion));
+        return stack;
+    }
+
+    public static ItemStack setItemStackPotion(ItemStack stack, PotionContents contents) {
+        stack.set(DataComponents.POTION_CONTENTS, contents);
         return stack;
     }
 
@@ -157,6 +169,15 @@ public class LegacyItemUtil {
     }
 
     public static DyeColor getDyeColor(Item item) {
+        DyeColor color = getDyeColorOrNull(item);
+        return color == null ? DyeColor.BLACK : color;
+    }
+
+    public static DyeColor getDyeColorOrNull(Item item) {
+        if (item == Items.BONE_MEAL) return DyeColor.WHITE;
+        if (item == Items.INK_SAC) return DyeColor.BLACK;
+        if (item == Items.LAPIS_LAZULI) return DyeColor.BLUE;
+        if (item == Items.COCOA_BEANS) return DyeColor.BROWN;
         if (item == Items.WHITE_DYE) return DyeColor.WHITE;
         if (item == Items.ORANGE_DYE) return DyeColor.ORANGE;
         if (item == Items.MAGENTA_DYE) return DyeColor.MAGENTA;
@@ -172,7 +193,18 @@ public class LegacyItemUtil {
         if (item == Items.BROWN_DYE) return DyeColor.BROWN;
         if (item == Items.GREEN_DYE) return DyeColor.GREEN;
         if (item == Items.RED_DYE) return DyeColor.RED;
-        return DyeColor.BLACK;
+        if (item == Items.BLACK_DYE) return DyeColor.BLACK;
+        return null;
+    }
+
+    public static Item getLegacyDyeItem(DyeColor color) {
+        return switch (color) {
+            case WHITE -> Items.BONE_MEAL;
+            case BLACK -> Items.INK_SAC;
+            case BLUE -> Items.LAPIS_LAZULI;
+            case BROWN -> Items.COCOA_BEANS;
+            default -> null;
+        };
     }
 
     public static Item getDyeItem(DyeColor color) {
@@ -257,7 +289,16 @@ public class LegacyItemUtil {
     }
 
     public static List<Component> sanitizeTooltip(ItemStack stack, List<Component> tooltip) {
-        if (!isSkullItem(stack) || tooltip.size() < 2) return tooltip;
-        return List.of(tooltip.getFirst());
+        if (tooltip.stream().anyMatch(LegacyItemUtil::isPeacefulSpawnEggTip)) {
+            tooltip = tooltip.stream().filter(component -> !isPeacefulSpawnEggTip(component)).toList();
+        }
+        return tooltip;
+    }
+
+    private static boolean isPeacefulSpawnEggTip(Component component) {
+        if (component.getContents() instanceof TranslatableContents contents && PEACEFUL_SPAWN_EGG_TIPS.contains(contents.getKey())) {
+            return true;
+        }
+        return component.getSiblings().stream().anyMatch(LegacyItemUtil::isPeacefulSpawnEggTip);
     }
 }
